@@ -1,0 +1,336 @@
+@startuml Redis持久化机制
+
+' Redis持久化机制图
+' 描述：Redis的RDB和AOF持久化实现细节和流程
+
+title Redis持久化机制架构
+
+allowmixing
+
+' 定义颜色
+skinparam packageStyle rectangle
+skinparam backgroundColor white
+skinparam componentStyle uml2
+
+' 持久化主要组件
+package "Redis持久化系统" {
+  component "持久化管理" as PersistenceManager
+  note right: "负责协调RDB和AOF持久化\n实现路径: src/server.c"
+  
+  ' RDB持久化
+  package "RDB持久化" {
+    component "RDB保存" as RDBSave {
+      note bottom: "生成RDB文件\n实现路径: src/rdb.c"
+    }
+    
+    component "RDB加载" as RDBLoad {
+      note bottom: "加载RDB文件\n实现路径: src/rdb.c"
+    }
+    
+    component "后台保存" as BGSave {
+      note right: "后台生成RDB文件\n实现路径: src/rdb.c"
+    }
+    
+    ' RDB文件格式
+    class RDBFile {
+      + REDIS : char[5]    ' 文件标识 "REDIS"
+      + version : char[4]  ' RDB版本
+      + databases : 变长   ' 数据库数据
+      + EOF : uint8_t      ' 结束标记
+      + check_sum : uint64_t ' 校验和
+      --
+      <b>RDB文件格式</b>
+      二进制格式，包含Redis数据快照
+    }
+    
+    note bottom of RDBFile
+      RDB文件是一个紧凑的二进制文件，包含以下特点：
+      1. 文件头部包含"REDIS"标识和版本号
+      2. 每个数据库以SELECTDB标记开始
+      3. 每个键值对包含过期时间(可选)、类型、键、值
+      4. 文件尾部包含EOF标记和校验和
+    end note
+  }
+  
+  ' AOF持久化
+  package "AOF持久化" {
+    component "AOF写入" as AOFWrite {
+      note bottom: "写入命令到AOF缓冲区\n实现路径: src/aof.c"
+    }
+    
+    component "AOF同步" as AOFSync {
+      note bottom: "将AOF缓冲区同步到磁盘\n实现路径: src/aof.c"
+    }
+    
+    component "AOF重写" as AOFRewrite {
+      note right: "重写AOF文件以减小体积\n实现路径: src/aof.c"
+    }
+    
+    component "AOF加载" as AOFLoad {
+      note bottom: "加载AOF文件\n实现路径: src/aof.c"
+    }
+    
+    ' AOF文件格式
+    class AOFFile {
+      + commands : 变长    ' Redis命令序列
+      --
+      <b>AOF文件格式</b>
+      文本格式，包含Redis命令
+    }
+    
+    note bottom of AOFFile
+      AOF文件是一个文本文件，包含以下特点：
+      1. 每个写命令以Redis协议格式存储
+      2. 可以使用文本编辑器查看和编辑
+      3. 支持AOF重写以减小文件体积
+      4. Redis 7.0引入了多AOF文件支持
+    end note
+    
+    ' AOF持久化策略
+    class AOFSyncPolicy {
+      + always            ' 每个命令都同步
+      + everysec          ' 每秒同步一次
+      + no                ' 由操作系统决定
+      --
+      <b>AOF同步策略</b>
+      控制AOF文件同步到磁盘的频率
+    }
+    
+    note bottom of AOFSyncPolicy
+      AOF同步策略影响持久化的安全性和性能：
+      1. always: 最安全，但性能最差
+      2. everysec: 安全性和性能的平衡，最多丢失1秒数据
+      3. no: 性能最好，但安全性最差
+    end note
+    
+    ' AOF重写
+    class AOFRewriteProcess {
+      + 创建子进程
+      + 生成新AOF文件
+      + 累积重写缓冲区
+      + 替换旧AOF文件
+      --
+      <b>AOF重写过程</b>
+      通过重新生成命令减小AOF文件体积
+    }
+    
+    note bottom of AOFRewriteProcess
+      AOF重写过程：
+      1. Redis创建子进程执行重写
+      2. 子进程遍历数据库生成最优命令序列
+      3. 父进程继续处理命令并累积到AOF重写缓冲区
+      4. 子进程完成后，父进程将重写缓冲区追加到新AOF文件
+      5. 原子性地替换旧AOF文件
+    end note
+  }
+  
+  ' 混合持久化
+  package "混合持久化" {
+    component "混合AOF" as MixedAOF {
+      note bottom: "RDB格式+AOF命令\n实现路径: src/aof.c"
+    }
+    
+    class MixedAOFFormat {
+      + RDB部分           ' 数据库基础状态
+      + AOF部分           ' 增量命令
+      --
+      <b>混合AOF格式</b>
+      结合RDB和AOF的优点
+    }
+    
+    note bottom of MixedAOFFormat
+      混合持久化(Redis 4.0引入)结合了RDB和AOF的优点：
+      1. 文件开头是RDB格式，保存基础数据库状态
+      2. 文件后半部分是AOF格式，保存增量命令
+      3. 兼顾了RDB的恢复速度和AOF的数据安全性
+    end note
+  }
+  
+  ' 多AOF文件
+  package "多AOF文件" {
+    component "AOF清单" as AOFManifest {
+      note bottom: "管理多个AOF文件\n实现路径: src/aof.c"
+    }
+    
+    class AOFFileTypes {
+      + BASE              ' 基础AOF文件(类似RDB)
+      + INCR              ' 增量AOF文件
+      + HISTORY           ' 历史AOF文件
+      --
+      <b>AOF文件类型</b>
+      Redis 7.0引入的多AOF文件支持
+    }
+    
+    note bottom of AOFFileTypes
+      Redis 7.0引入的多AOF文件支持：
+      1. BASE文件：包含完整数据库状态
+      2. INCR文件：包含增量命令
+      3. HISTORY文件：历史文件，可用于恢复
+      
+      多AOF文件通过manifest文件管理，
+      提高了AOF的可靠性和性能。
+    end note
+  }
+}
+
+' 持久化相关的服务器组件
+package "服务器组件" {
+  component "服务器核心" as ServerCore {
+    note bottom: "Redis服务器核心\n实现路径: src/server.c"
+  }
+  
+  component "事件循环" as EventLoop {
+    note bottom: "事件处理循环\n实现路径: src/ae.c"
+  }
+  
+  component "后台I/O" as BIO {
+    note bottom: "后台I/O线程\n实现路径: src/bio.c"
+  }
+  
+  component "子进程管理" as ChildProcess {
+    note bottom: "管理RDB/AOF子进程\n实现路径: src/server.c"
+  }
+}
+
+' 持久化配置
+package "持久化配置" {
+  class RDBConfig {
+    + save : string[]     ' 自动保存条件
+    + dbfilename : string ' RDB文件名
+    + rdbcompression : bool ' 是否压缩
+    + rdbchecksum : bool  ' 是否校验和
+    --
+    <b>RDB配置</b>
+    控制RDB持久化行为
+  }
+  
+  class AOFConfig {
+    + appendonly : bool   ' 是否启用AOF
+    + appendfilename : string ' AOF文件名
+    + appendfsync : enum  ' 同步策略
+    + aof-use-rdb-preamble : bool ' 是否使用混合持久化
+    + auto-aof-rewrite-percentage : int ' 重写触发百分比
+    + auto-aof-rewrite-min-size : size ' 重写最小大小
+    --
+    <b>AOF配置</b>
+    控制AOF持久化行为
+  }
+  
+  note bottom of RDBConfig
+    RDB配置示例：
+    save 900 1      # 900秒内至少1个键变化
+    save 300 10     # 300秒内至少10个键变化
+    save 60 10000   # 60秒内至少10000个键变化
+    dbfilename dump.rdb
+    rdbcompression yes
+    rdbchecksum yes
+  end note
+  
+  note bottom of AOFConfig
+    AOF配置示例：
+    appendonly yes
+    appendfilename "appendonly.aof"
+    appendfsync everysec
+    aof-use-rdb-preamble yes
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+  end note
+}
+
+' 持久化流程
+package "持久化流程" {
+  class ServerStartup {
+    + 加载RDB或AOF
+    + 初始化持久化设置
+    --
+    <b>服务器启动流程</b>
+    加载持久化数据
+  }
+  
+  class CommandExecution {
+    + 执行命令
+    + 修改数据
+    + 追加到AOF缓冲区
+    + 触发RDB保存条件检查
+    --
+    <b>命令执行流程</b>
+    处理命令并更新持久化状态
+  }
+  
+  class ServerCron {
+    + 检查RDB保存条件
+    + 执行AOF重写检查
+    + 执行AOF缓冲区同步
+    --
+    <b>服务器周期性任务</b>
+    定期执行持久化相关任务
+  }
+  
+  note bottom of ServerStartup
+    服务器启动时的持久化加载流程：
+    1. 如果开启了AOF，优先加载AOF文件
+    2. 如果AOF未开启或加载失败，尝试加载RDB文件
+    3. 初始化持久化相关设置
+  end note
+  
+  note bottom of CommandExecution
+    命令执行时的持久化处理：
+    1. 执行修改数据的命令
+    2. 如果AOF开启，将命令追加到AOF缓冲区
+    3. 更新脏键计数，用于触发RDB保存
+  end note
+  
+  note bottom of ServerCron
+    服务器周期性任务中的持久化处理：
+    1. 检查是否满足RDB保存条件
+    2. 检查是否需要执行AOF重写
+    3. 根据appendfsync策略执行AOF同步
+  end note
+}
+
+' 关系
+ServerCore --> PersistenceManager : 包含
+PersistenceManager --> RDBSave : 调用
+PersistenceManager --> RDBLoad : 调用
+PersistenceManager --> AOFWrite : 调用
+PersistenceManager --> AOFSync : 调用
+PersistenceManager --> AOFRewrite : 调用
+PersistenceManager --> AOFLoad : 调用
+PersistenceManager --> MixedAOF : 调用
+PersistenceManager --> AOFManifest : 管理
+
+RDBSave --> RDBFile : 生成
+RDBLoad --> RDBFile : 读取
+BGSave --> RDBSave : 后台执行
+
+AOFWrite --> AOFFile : 写入
+AOFSync --> AOFFile : 同步
+AOFRewrite --> AOFFile : 重写
+AOFLoad --> AOFFile : 读取
+AOFSync --> AOFSyncPolicy : 使用
+AOFRewrite --> AOFRewriteProcess : 执行
+
+MixedAOF --> MixedAOFFormat : 使用
+AOFManifest --> AOFFileTypes : 管理
+
+ServerCore --> EventLoop : 使用
+ServerCore --> BIO : 使用
+ServerCore --> ChildProcess : 使用
+BIO --> AOFSync : 执行
+ChildProcess --> BGSave : 管理
+ChildProcess --> AOFRewrite : 管理
+
+PersistenceManager --> RDBConfig : 配置
+PersistenceManager --> AOFConfig : 配置
+
+ServerCore --> ServerStartup : 执行
+ServerCore --> CommandExecution : 执行
+ServerCore --> ServerCron : 执行
+ServerStartup --> RDBLoad : 调用
+ServerStartup --> AOFLoad : 调用
+CommandExecution --> AOFWrite : 调用
+ServerCron --> BGSave : 触发
+ServerCron --> AOFRewrite : 触发
+ServerCron --> AOFSync : 触发
+
+@enduml

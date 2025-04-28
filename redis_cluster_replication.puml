@@ -1,0 +1,381 @@
+@startuml Redis集群和复制架构
+
+' Redis集群和复制架构图
+' 描述：Redis的集群实现和主从复制机制
+
+title Redis集群和复制架构
+
+
+' 定义颜色
+skinparam packageStyle rectangle
+skinparam backgroundColor white
+skinparam componentStyle uml2
+
+' 主从复制
+package "主从复制" {
+  class ReplicationManager {
+    + masterhost : char*         ' 主服务器主机名
+    + masterport : int           ' 主服务器端口
+    + master : client*           ' 主服务器客户端
+    + repl_state : int           ' 复制状态
+    + repl_transfer_size : off_t ' 传输大小
+    + repl_transfer_fd : int     ' 传输文件描述符
+    + repl_transfer_tmpfile : char* ' 临时文件
+    + repl_transfer_lastio : time_t ' 最后I/O时间
+    + repl_down_since : time_t   ' 主服务器下线时间
+    + ...
+    --
+    <b>复制管理器</b>
+    实现路径: src/server.h (server结构体的一部分)
+  }
+  
+  enum ReplicationState {
+    + REPL_STATE_NONE            ' 未复制
+    + REPL_STATE_CONNECT         ' 连接中
+    + REPL_STATE_CONNECTING      ' 正在连接
+    + REPL_STATE_RECEIVE_PONG    ' 接收PONG
+    + REPL_STATE_SEND_AUTH       ' 发送认证
+    + REPL_STATE_SEND_PORT       ' 发送端口
+    + REPL_STATE_RECEIVE_AUTH    ' 接收认证结果
+    + REPL_STATE_SEND_CAPA       ' 发送能力
+    + REPL_STATE_RECEIVE_CAPA    ' 接收能力
+    + REPL_STATE_SEND_PSYNC      ' 发送PSYNC
+    + REPL_STATE_RECEIVE_PSYNC   ' 接收PSYNC结果
+    + REPL_STATE_TRANSFER        ' 传输RDB
+    + REPL_STATE_CONNECTED       ' 已连接
+    --
+    <b>复制状态</b>
+    实现路径: src/server.h
+  }
+  
+  class ReplicationBacklog {
+    + backlog : char*            ' 复制积压缓冲区
+    + size : long long           ' 缓冲区大小
+    + offset : long long         ' 当前偏移量
+    + histlen : long long        ' 历史数据长度
+    --
+    <b>复制积压缓冲区</b>
+    实现路径: src/server.h (server结构体的一部分)
+  }
+  
+  class PSyncProcess {
+    + PSYNC2                     ' 部分重同步协议
+    + master_replid : char[41]   ' 主服务器复制ID
+    + master_initial_offset : long long ' 初始偏移量
+    --
+    <b>部分重同步过程</b>
+    实现路径: src/replication.c
+  }
+  
+  note bottom of ReplicationManager
+    复制管理器负责处理Redis的主从复制：
+    1. 作为从服务器时，连接到主服务器
+    2. 作为主服务器时，管理从服务器列表
+    3. 处理复制状态转换
+    4. 管理复制积压缓冲区
+    
+    实现路径: src/replication.c
+  end note
+  
+  note bottom of ReplicationBacklog
+    复制积压缓冲区是一个环形缓冲区：
+    1. 主服务器将写命令同时写入复制积压缓冲区
+    2. 用于支持部分重同步(PSYNC)
+    3. 当从服务器断开重连时，可以只同步缺失的部分
+    
+    实现路径: src/replication.c
+  end note
+  
+  note bottom of PSyncProcess
+    部分重同步(PSYNC)过程：
+    1. 从服务器发送PSYNC命令，包含复制ID和偏移量
+    2. 主服务器检查复制ID和偏移量是否在积压缓冲区范围内
+    3. 如果可以部分重同步，发送CONTINUE
+    4. 如果不能部分重同步，发送FULLRESYNC和新的复制ID
+    
+    实现路径: src/replication.c
+  end note
+}
+
+' 哨兵模式
+package "哨兵模式" {
+  class SentinelState {
+    + current_epoch : uint64_t   ' 当前纪元
+    + masters : dict*            ' 主服务器字典
+    + tilt : int                 ' 倾斜模式标志
+    + tilt_start_time : mstime_t ' 倾斜模式开始时间
+    + previous_time : mstime_t   ' 上次执行时间
+    + running_scripts : int      ' 运行脚本数量
+    + scripts_queue : list*      ' 脚本队列
+    + announce_ip : char*        ' 公告IP
+    + announce_port : int        ' 公告端口
+    + ...
+    --
+    <b>哨兵状态</b>
+    实现路径: src/sentinel.c
+  }
+  
+  class SentinelRedisInstance {
+    + flags : int                ' 实例标志
+    + name : char*               ' 实例名称
+    + runid : char*              ' 运行ID
+    + config_epoch : uint64_t    ' 配置纪元
+    + addr : sentinelAddr*       ' 地址
+    + down_after_period : mstime_t ' 主观下线时间
+    + quorum : int               ' 客观下线所需票数
+    + parallel_syncs : int       ' 并行同步数量
+    + failover_timeout : mstime_t ' 故障转移超时
+    + slaves : dict*             ' 从服务器字典
+    + sentinels : dict*          ' 哨兵字典
+    + ...
+    --
+    <b>哨兵监控的Redis实例</b>
+    实现路径: src/sentinel.c
+  }
+  
+  class SentinelFailoverState {
+    + SENTINEL_FAILOVER_STATE_NONE ' 无故障转移
+    + SENTINEL_FAILOVER_STATE_WAIT_START ' 等待开始
+    + SENTINEL_FAILOVER_STATE_SELECT_SLAVE ' 选择从服务器
+    + SENTINEL_FAILOVER_STATE_SEND_SLAVEOF_NOONE ' 发送SLAVEOF NO ONE
+    + SENTINEL_FAILOVER_STATE_WAIT_PROMOTION ' 等待晋升
+    + SENTINEL_FAILOVER_STATE_RECONF_SLAVES ' 重新配置从服务器
+    + SENTINEL_FAILOVER_STATE_UPDATE_CONFIG ' 更新配置
+    + SENTINEL_FAILOVER_STATE_SEND_FAILOVER_AUTH ' 发送故障转移授权
+    + SENTINEL_FAILOVER_STATE_DETECT_END ' 检测结束
+    --
+    <b>故障转移状态</b>
+    实现路径: src/sentinel.c
+  }
+  
+  note bottom of SentinelState
+    哨兵状态包含哨兵系统的全局状态：
+    1. 监控的主服务器列表
+    2. 当前纪元(用于选举)
+    3. 倾斜模式状态(当系统时钟不稳定时)
+    
+    实现路径: src/sentinel.c
+  end note
+  
+  note bottom of SentinelRedisInstance
+    哨兵监控的Redis实例：
+    1. 可以是主服务器、从服务器或其他哨兵
+    2. 记录实例的状态、地址和配置
+    3. 对于主服务器，还记录其从服务器和其他监控该主服务器的哨兵
+    
+    实现路径: src/sentinel.c
+  end note
+  
+  note bottom of SentinelFailoverState
+    故障转移状态机：
+    1. 当主服务器被判定为客观下线时，开始故障转移
+    2. 选举领导者哨兵
+    3. 选择最合适的从服务器作为新主服务器
+    4. 将选中的从服务器升级为主服务器
+    5. 重新配置其他从服务器指向新主服务器
+    
+    实现路径: src/sentinel.c
+  end note
+}
+
+' 集群模式
+package "集群模式" {
+  class ClusterState {
+    + state : int                ' 集群状态
+    + size : int                 ' 集群大小
+    + myself : clusterNode*      ' 当前节点
+    + currentEpoch : uint64_t    ' 当前纪元
+    + nodes : dict*              ' 节点字典
+    + slots : clusterNode*[16384] ' 槽到节点的映射
+    + slots_to_keys : rax*       ' 槽到键的映射
+    + failover_auth_time : mstime_t ' 故障转移授权时间
+    + failover_auth_count : int  ' 故障转移授权计数
+    + failover_auth_rank : int   ' 故障转移授权排名
+    + failover_auth_epoch : uint64_t ' 故障转移授权纪元
+    + ...
+    --
+    <b>集群状态</b>
+    实现路径: src/cluster.h
+  }
+  
+  class ClusterNode {
+    + name : char[CLUSTER_NAMELEN+1] ' 节点名称(ID)
+    + ip : char[NET_IP_STR_LEN]   ' 节点IP
+    + port : int                 ' 节点端口
+    + cport : int                ' 集群总线端口
+    + flags : unsigned short     ' 节点标志
+    + configEpoch : uint64_t     ' 配置纪元
+    + numslots : int             ' 负责的槽数量
+    + slots : unsigned char[CLUSTER_SLOTS/8] ' 槽位图
+    + slaveof : clusterNode*     ' 主节点(如果是从节点)
+    + slaves : clusterNode*[]    ' 从节点列表(如果是主节点)
+    + numslaves : int            ' 从节点数量
+    + ...
+    --
+    <b>集群节点</b>
+    实现路径: src/cluster.h
+  }
+  
+  class ClusterLink {
+    + node : clusterNode*        ' 关联的节点
+    + conn : connection*         ' 连接
+    + inbuf : sds                ' 输入缓冲区
+    + sndbuf : sds               ' 发送缓冲区
+    + rcvbuf : sds               ' 接收缓冲区
+    + create_time : time_t       ' 创建时间
+    + ...
+    --
+    <b>集群连接</b>
+    实现路径: src/cluster.h
+  }
+
+  class ClusterMessage {
+    + type : uint16_t            ' 消息类型
+    + sender : char[CLUSTER_NAMELEN+1] ' 发送者ID
+    + myslots : uint16_t[CLUSTER_SLOTS/16] ' 槽位图
+    + configEpoch : uint64_t     ' 配置纪元
+    + offset : uint64_t          ' 复制偏移量
+    + data : clusterMsgDataUnion ' 消息数据
+
+'    note right:
+'      union clusterMsgDataUnion {
+'        ping : clusterMsgDataPing
+'        pong : clusterMsgDataPong
+'        fail : clusterMsgDataFail
+'        publish : clusterMsgDataPublish
+'        update : clusterMsgDataUpdate
+'        module : clusterMsgModule
+'      }
+'    end note
+
+    --
+    <b>集群消息</b>
+    实现路径: src/cluster.h
+  }
+
+  enum ClusterMessageType {
+    + CLUSTERMSG_TYPE_PING       ' PING消息
+    + CLUSTERMSG_TYPE_PONG       ' PONG消息
+    + CLUSTERMSG_TYPE_MEET       ' MEET消息
+    + CLUSTERMSG_TYPE_FAIL       ' FAIL消息
+    + CLUSTERMSG_TYPE_PUBLISH    ' PUBLISH消息
+    + CLUSTERMSG_TYPE_UPDATE     ' UPDATE消息
+    + CLUSTERMSG_TYPE_MODULE     ' MODULE消息
+    --
+    <b>集群消息类型</b>
+    实现路径: src/cluster.h
+  }
+
+  class ClusterSlot {
+    + 16384个哈希槽              ' Redis集群的哈希槽
+    --
+    <b>集群槽</b>
+    实现路径: src/cluster.c
+  }
+
+  note bottom of ClusterState
+    集群状态包含当前节点视角下的集群信息：
+    1. 集群中的所有节点
+    2. 槽到节点的映射
+    3. 当前正在进行的故障转移
+    4. 集群的当前纪元
+
+    实现路径: src/cluster.c
+  end note
+
+  note bottom of ClusterNode
+    集群节点表示集群中的一个Redis实例：
+    1. 节点的唯一ID、IP和端口
+    2. 节点负责的哈希槽
+    3. 主从关系
+    4. 节点状态标志
+
+    实现路径: src/cluster.c
+  end note
+
+  note bottom of ClusterMessage
+    集群消息用于节点间通信：
+    1. PING/PONG: 心跳检测
+    2. MEET: 引入新节点
+    3. FAIL: 通知节点失败
+    4. PUBLISH: 发布消息
+    5. UPDATE: 更新配置
+
+    实现路径: src/cluster.c
+  end note
+
+  note bottom of ClusterSlot
+    Redis集群使用16384个哈希槽分配数据：
+    1. 每个键通过CRC16算法映射到一个槽
+    2. 每个主节点负责一部分槽
+    3. 槽可以在节点间迁移
+    4. 客户端可以通过MOVED/ASK重定向找到正确的节点
+
+    实现路径: src/cluster.c
+  end note
+}
+
+' 客户端重定向
+package "客户端重定向" {
+  class ClusterRedirection {
+    + MOVED重定向               ' 槽已永久迁移
+    + ASK重定向                 ' 槽正在迁移中
+    --
+    <b>集群重定向</b>
+    实现路径: src/cluster.c
+  }
+
+  note bottom of ClusterRedirection
+    Redis集群的客户端重定向机制：
+    1. MOVED: 表示槽已永久迁移到另一个节点
+       - 客户端应更新槽映射缓存
+    2. ASK: 表示槽正在迁移中
+       - 客户端需要先发送ASKING命令，然后重试
+
+    实现路径: src/cluster.c
+  end note
+}
+
+' 槽迁移
+package "槽迁移" {
+  class ClusterMigration {
+    + CLUSTER SETSLOT           ' 设置槽所有权
+    + MIGRATE命令               ' 迁移键
+    + CLUSTER GETKEYSINSLOT     ' 获取槽中的键
+    --
+    <b>槽迁移过程</b>
+    实现路径: src/cluster.c
+  }
+
+  note bottom of ClusterMigration
+    槽迁移过程：
+    1. 将目标槽标记为MIGRATING状态
+    2. 将目标节点的槽标记为IMPORTING状态
+    3. 使用MIGRATE命令将键从源节点迁移到目标节点
+    4. 完成后更新集群配置
+
+    实现路径: src/cluster.c
+  end note
+}
+
+' 关系
+ReplicationManager --> ReplicationState : 使用
+ReplicationManager *-- ReplicationBacklog : 包含
+ReplicationManager --> PSyncProcess : 执行
+
+SentinelState *-- SentinelRedisInstance : 监控
+SentinelRedisInstance --> SentinelFailoverState : 执行
+
+ClusterState *-- ClusterNode : 包含
+ClusterState *-- ClusterSlot : 管理
+ClusterNode *-- ClusterLink : 连接
+ClusterLink --> ClusterMessage : 传输
+ClusterMessage --> ClusterMessageType : 使用
+ClusterState --> ClusterRedirection : 执行
+ClusterState --> ClusterMigration : 执行
+
+' 跨包关系
+ReplicationManager --> ClusterState : 在集群模式下协作
+SentinelState --> ReplicationManager : 监控和管理
+
+@enduml

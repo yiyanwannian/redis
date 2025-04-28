@@ -1,0 +1,464 @@
+@startuml Redis内存管理和数据淘汰策略
+
+' Redis内存管理和数据淘汰策略图
+' 描述：Redis的内存分配、管理和淘汰策略实现
+
+title Redis内存管理和数据淘汰策略
+
+' 定义颜色
+skinparam packageStyle rectangle
+skinparam backgroundColor white
+skinparam componentStyle uml2
+
+' 内存分配器
+package "内存分配器" {
+  class ZMalloc {
+    + zmalloc : function         ' 分配内存
+    + zcalloc : function         ' 分配并清零内存
+    + zrealloc : function        ' 重新分配内存
+    + zfree : function           ' 释放内存
+    + zmalloc_used_memory : function ' 获取已用内存
+    + zmalloc_get_rss : function ' 获取物理内存占用
+    + zmalloc_get_allocator : function ' 获取分配器名称
+    --
+    <b>内存分配器封装</b>
+    实现路径: src/zmalloc.c
+  }
+  
+  class JeMalloc {
+    + je_malloc : function       ' 分配内存
+    + je_calloc : function       ' 分配并清零内存
+    + je_realloc : function      ' 重新分配内存
+    + je_free : function         ' 释放内存
+    + je_mallctl : function      ' 控制jemalloc行为
+    --
+    <b>jemalloc分配器</b>
+    实现路径: deps/jemalloc
+  }
+  
+  class LibcMalloc {
+    + malloc : function          ' 分配内存
+    + calloc : function          ' 分配并清零内存
+    + realloc : function         ' 重新分配内存
+    + free : function            ' 释放内存
+    --
+    <b>libc分配器</b>
+    实现路径: 系统库
+  }
+  
+  class TcMalloc {
+    + tc_malloc : function       ' 分配内存
+    + tc_calloc : function       ' 分配并清零内存
+    + tc_realloc : function      ' 重新分配内存
+    + tc_free : function         ' 释放内存
+    --
+    <b>tcmalloc分配器</b>
+    实现路径: 外部库
+  }
+  
+  note bottom of ZMalloc
+    ZMalloc是Redis的内存分配器封装层：
+    1. 提供统一的内存分配接口
+    2. 跟踪已分配内存大小
+    3. 支持多种底层分配器(jemalloc/tcmalloc/libc)
+    4. 默认使用jemalloc
+    
+    实现路径: src/zmalloc.c
+  end note
+  
+  note bottom of JeMalloc
+    jemalloc是Redis默认的内存分配器：
+    1. 减少内存碎片
+    2. 提高多线程性能
+    3. 支持内存使用统计
+    4. 支持后台线程定期整理内存
+    
+    实现路径: deps/jemalloc
+  end note
+}
+
+' 内存使用跟踪
+package "内存使用跟踪" {
+  class MemoryUsage {
+    + used_memory : size_t       ' 已用内存(字节)
+    + used_memory_rss : size_t   ' 物理内存占用(字节)
+    + used_memory_peak : size_t  ' 内存使用峰值(字节)
+    + used_memory_lua : size_t   ' Lua引擎内存(字节)
+    + mem_fragmentation_ratio : float ' 内存碎片率
+    + mem_allocator : char*      ' 内存分配器名称
+    + active_defrag_running : int ' 主动碎片整理状态
+    --
+    <b>内存使用统计</b>
+    实现路径: src/server.h (server结构体的一部分)
+  }
+  
+  class ObjectMemory {
+    + getObjectType : function   ' 获取对象类型
+    + getObjectEncoding : function ' 获取对象编码
+    + getObjectRefcount : function ' 获取引用计数
+    + getObjectLRUClock : function ' 获取LRU时钟
+    + getObjectIdleTime : function ' 获取空闲时间
+    + getObjectFreq : function   ' 获取访问频率
+    + getObjectSize : function   ' 获取对象大小
+    --
+    <b>对象内存管理</b>
+    实现路径: src/object.c
+  }
+  
+  note bottom of MemoryUsage
+    Redis跟踪多种内存使用指标：
+    1. used_memory: Redis分配的内存总量
+    2. used_memory_rss: 操作系统分配给Redis的物理内存
+    3. mem_fragmentation_ratio: 内存碎片率(used_memory_rss/used_memory)
+    4. 可通过INFO MEMORY命令查看
+    
+    实现路径: src/server.c
+  end note
+  
+  note bottom of ObjectMemory
+    Redis对象内存管理：
+    1. 每个对象都有类型、编码和引用计数
+    2. 共享整数对象减少内存使用
+    3. 对象可以有不同的内部编码以优化内存
+    4. OBJECT命令可以查看对象内存信息
+    
+    实现路径: src/object.c
+  end note
+}
+
+' 内存优化
+package "内存优化" {
+  class SharedObjects {
+    + integers : robj*[OBJ_SHARED_INTEGERS] ' 共享整数对象
+    + nullbulk : robj*           ' 空字符串对象
+    + emptymap : robj*           ' 空哈希对象
+    + emptyset : robj*           ' 空集合对象
+    + emptylist : robj*          ' 空列表对象
+    --
+    <b>共享对象</b>
+    实现路径: src/server.h (shared结构体)
+  }
+  
+  class EncodingOptimization {
+    + 整数编码                   ' 将字符串存为整数
+    + embstr编码                 ' 优化短字符串存储
+    + ziplist编码                ' 优化小哈希/列表/集合
+    + intset编码                 ' 优化整数集合
+    + listpack编码               ' 优化小列表/哈希
+    --
+    <b>编码优化</b>
+    实现路径: src/object.c
+  }
+  
+  class ActiveDefrag {
+    + activeDefragCycle : function ' 碎片整理周期
+    + activeDefragSdsDict : function ' SDS字典碎片整理
+    + activeDefragScanner : function ' 对象扫描器
+    --
+    <b>主动碎片整理</b>
+    实现路径: src/defrag.c
+  }
+  
+  note bottom of SharedObjects
+    Redis使用共享对象减少内存使用：
+    1. 共享小整数对象(0-9999)
+    2. 共享常用回复对象(如OK、错误信息)
+    3. 共享空对象(空字符串、空列表等)
+    
+    实现路径: src/object.c
+  end note
+  
+  note bottom of EncodingOptimization
+    Redis使用多种编码优化内存使用：
+    1. 将字符串存为整数(当可能时)
+    2. 使用embstr编码存储短字符串(<=44字节)
+    3. 使用ziplist/listpack存储小集合/哈希/列表
+    4. 使用intset存储只包含整数的小集合
+    
+    实现路径: src/object.c
+  end note
+  
+  note bottom of ActiveDefrag
+    主动碎片整理(Redis 4.0引入)：
+    1. 在后台重新分配碎片化的内存
+    2. 可配置触发条件和CPU使用限制
+    3. 扫描所有数据库中的对象
+    4. 重新分配SDS、字典等数据结构
+    
+    实现路径: src/defrag.c
+  end note
+}
+
+' 内存限制
+package "内存限制" {
+  class MemoryLimit {
+    + maxmemory : unsigned long long ' 最大内存限制
+    + maxmemory_policy : int     ' 内存淘汰策略
+    + maxmemory_samples : int    ' 采样数量
+    --
+    <b>内存限制</b>
+    实现路径: src/server.h (server结构体的一部分)
+  }
+  
+  enum MaxMemoryPolicy {
+    + MAXMEMORY_NO_EVICTION     ' 不淘汰，返回错误
+    + MAXMEMORY_VOLATILE_LRU    ' 淘汰最久未使用的过期键
+    + MAXMEMORY_VOLATILE_LFU    ' 淘汰最少使用的过期键
+    + MAXMEMORY_VOLATILE_TTL    ' 淘汰最近过期的键
+    + MAXMEMORY_VOLATILE_RANDOM ' 随机淘汰过期键
+    + MAXMEMORY_ALLKEYS_LRU     ' 淘汰最久未使用的任意键
+    + MAXMEMORY_ALLKEYS_LFU     ' 淘汰最少使用的任意键
+    + MAXMEMORY_ALLKEYS_RANDOM  ' 随机淘汰任意键
+    --
+    <b>内存淘汰策略</b>
+    实现路径: src/server.h
+  }
+  
+  note bottom of MemoryLimit
+    Redis内存限制配置：
+    1. maxmemory: 最大可用内存(字节)
+    2. maxmemory_policy: 达到限制时的淘汰策略
+    3. maxmemory_samples: 淘汰算法的采样数量
+    
+    实现路径: src/config.c
+  end note
+  
+  note bottom of MaxMemoryPolicy
+    Redis支持8种内存淘汰策略：
+    1. noeviction: 不淘汰，写入时返回错误
+    2. volatile-lru: 淘汰最久未使用的过期键
+    3. volatile-lfu: 淘汰最少使用的过期键
+    4. volatile-ttl: 淘汰最近过期的键
+    5. volatile-random: 随机淘汰过期键
+    6. allkeys-lru: 淘汰最久未使用的任意键
+    7. allkeys-lfu: 淘汰最少使用的任意键
+    8. allkeys-random: 随机淘汰任意键
+    
+    实现路径: src/evict.c
+  end note
+}
+
+' 淘汰算法
+package "淘汰算法" {
+  class LRUAlgorithm {
+    + estimateObjectIdleTime : function ' 估计对象空闲时间
+    + evictionPoolPopulate : function ' 填充淘汰池
+    + getLRUClock : function     ' 获取LRU时钟
+    --
+    <b>LRU算法</b>
+    实现路径: src/evict.c
+  }
+  
+  class LFUAlgorithm {
+    + LFUDecrAndReturn : function ' 衰减并返回频率
+    + LFULogIncr : function      ' 对数增加频率
+    + LFUGetTimeInMinutes : function ' 获取LFU时间(分钟)
+    --
+    <b>LFU算法</b>
+    实现路径: src/evict.c
+  }
+  
+  class EvictionPool {
+    + keys : evictionPoolEntry[EVPOOL_SIZE] ' 淘汰池条目
+    + count : int                ' 条目数量
+    --
+    <b>淘汰池</b>
+    实现路径: src/evict.c
+  }
+  
+  class EvictionCycle {
+    + performEvictions : function ' 执行淘汰
+    + freeMemoryIfNeeded : function ' 按需释放内存
+    + evictionPoolPopulate : function ' 填充淘汰池
+    --
+    <b>淘汰周期</b>
+    实现路径: src/evict.c
+  }
+  
+  note bottom of LRUAlgorithm
+    Redis的LRU算法实现：
+    1. 使用24位的LRU时钟记录最后访问时间
+    2. 使用采样近似LRU，而非严格LRU
+    3. 通过maxmemory_samples参数控制采样数量
+    4. 采样数量越大，越接近真实LRU，但CPU开销更大
+    
+    实现路径: src/evict.c
+  end note
+  
+  note bottom of LFUAlgorithm
+    Redis的LFU算法实现(Redis 4.0引入)：
+    1. 使用8位计数器记录访问频率
+    2. 使用16位计数器记录上次递减时间
+    3. 随时间衰减访问频率
+    4. 使用对数计数器增加频率(防止热点数据计数器溢出)
+    
+    实现路径: src/evict.c
+  end note
+  
+  note bottom of EvictionPool
+    淘汰池是Redis淘汰算法的核心：
+    1. 维护一个候选键的有序池
+    2. 根据策略(LRU/LFU/TTL/随机)填充池
+    3. 从池中选择最佳淘汰对象
+    4. 池大小固定为EVPOOL_SIZE(默认16)
+    
+    实现路径: src/evict.c
+  end note
+  
+  note bottom of EvictionCycle
+    淘汰周期执行流程：
+    1. 检查是否超过内存限制
+    2. 根据策略填充淘汰池
+    3. 从淘汰池中选择并删除键
+    4. 重复直到内存使用低于限制或无法继续淘汰
+    
+    实现路径: src/evict.c
+  end note
+}
+
+' 过期键管理
+package "过期键管理" {
+  class ExpireDict {
+    + expires : dict*            ' 过期字典
+    --
+    <b>过期字典</b>
+    实现路径: src/db.c
+  }
+  
+  class ExpireCycle {
+    + activeExpireCycle : function ' 主动过期周期
+    + expireIfNeeded : function  ' 按需过期
+    + expireSlaveKeys : function ' 从节点过期键
+    + propagateExpire : function ' 传播过期命令
+    --
+    <b>过期周期</b>
+    实现路径: src/expire.c
+  }
+  
+  enum ExpireMode {
+    + ACTIVE_EXPIRE_CYCLE_FAST  ' 快速过期周期
+    + ACTIVE_EXPIRE_CYCLE_SLOW  ' 慢速过期周期
+    --
+    <b>过期模式</b>
+    实现路径: src/expire.c
+  }
+  
+  note bottom of ExpireDict
+    Redis使用过期字典跟踪键的过期时间：
+    1. 每个数据库有一个过期字典
+    2. 键是对象的指针，值是过期时间(毫秒时间戳)
+    3. 支持EXPIRE、EXPIREAT、TTL等命令
+    
+    实现路径: src/db.c
+  end note
+  
+  note bottom of ExpireCycle
+    Redis使用三种策略删除过期键：
+    1. 被动过期：访问键时检查是否过期
+    2. 主动过期：周期性随机测试键是否过期
+    3. 从节点过期：接收DEL命令时删除
+    
+    实现路径: src/expire.c
+  end note
+  
+  note bottom of ExpireMode
+    Redis有两种主动过期模式：
+    1. 快速过期：系统空闲时执行
+    2. 慢速过期：serverCron中定期执行
+    
+    两种模式都使用采样方式，避免一次性扫描所有键。
+    
+    实现路径: src/expire.c
+  end note
+}
+
+' 懒惰释放
+package "懒惰释放" {
+  class LazyFree {
+    + lazyfree_lazy_eviction : int ' 淘汰时懒惰释放
+    + lazyfree_lazy_expire : int ' 过期时懒惰释放
+    + lazyfree_lazy_server_del : int ' 服务器删除时懒惰释放
+    + lazyfree_lazy_user_del : int ' 用户删除时懒惰释放
+    --
+    <b>懒惰释放配置</b>
+    实现路径: src/server.h (server结构体的一部分)
+  }
+  
+  class LazyFreeAPI {
+    + dbAsyncDelete : function   ' 异步删除键
+    + emptyDbAsync : function    ' 异步清空数据库
+    + freeObjAsync : function    ' 异步释放对象
+    --
+    <b>懒惰释放API</b>
+    实现路径: src/lazyfree.c
+  }
+  
+  class BioThread {
+    + bioCreateBackgroundJob : function ' 创建后台任务
+    + bioProcessBackgroundJobs : function ' 处理后台任务
+    --
+    <b>后台I/O线程</b>
+    实现路径: src/bio.c
+  }
+  
+  note bottom of LazyFree
+    懒惰释放(Redis 4.0引入)配置：
+    1. lazyfree-lazy-eviction: 淘汰时是否异步释放
+    2. lazyfree-lazy-expire: 过期时是否异步释放
+    3. lazyfree-lazy-server-del: 内部删除是否异步释放
+    4. lazyfree-lazy-user-del: UNLINK命令是否异步释放
+    
+    实现路径: src/config.c
+  end note
+  
+  note bottom of LazyFreeAPI
+    懒惰释放API：
+    1. 将释放大对象的任务交给后台线程
+    2. 主线程只删除键，不释放值对象
+    3. 减少删除大对象时的延迟
+    4. UNLINK命令是DEL的异步版本
+    
+    实现路径: src/lazyfree.c
+  end note
+  
+  note bottom of BioThread
+    后台I/O线程：
+    1. 处理耗时操作，如关闭文件、异步释放对象
+    2. 默认有3种类型的后台任务
+    3. BIO_CLOSE_FILE: 关闭文件
+    4. BIO_AOF_FSYNC: AOF同步
+    5. BIO_LAZY_FREE: 懒惰释放
+    
+    实现路径: src/bio.c
+  end note
+}
+
+' 关系
+ZMalloc --> JeMalloc : 默认使用
+ZMalloc --> LibcMalloc : 可选使用
+ZMalloc --> TcMalloc : 可选使用
+
+MemoryUsage --> ZMalloc : 跟踪
+ObjectMemory --> ZMalloc : 使用
+
+SharedObjects --> ObjectMemory : 优化
+EncodingOptimization --> ObjectMemory : 优化
+ActiveDefrag --> ZMalloc : 整理
+
+MemoryLimit --> MaxMemoryPolicy : 配置
+MemoryLimit --> EvictionCycle : 触发
+
+LRUAlgorithm --> EvictionPool : 填充
+LFUAlgorithm --> EvictionPool : 填充
+EvictionCycle --> EvictionPool : 使用
+EvictionCycle --> MaxMemoryPolicy : 根据策略
+
+ExpireDict --> ExpireCycle : 管理
+ExpireCycle --> ExpireMode : 使用
+
+LazyFree --> LazyFreeAPI : 配置
+LazyFreeAPI --> BioThread : 使用
+EvictionCycle --> LazyFreeAPI : 可选使用
+ExpireCycle --> LazyFreeAPI : 可选使用
+
+@enduml

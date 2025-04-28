@@ -168,7 +168,7 @@ void _serverLog(int level, const char *fmt, ...) {
     serverLogRaw(level,msg);
 }
 
-/* Low level logging from signal handler. Should be used with pre-formatted strings. 
+/* Low level logging from signal handler. Should be used with pre-formatted strings.
    See serverLogFromHandler. */
 void serverLogRawFromHandler(int level, const char *msg) {
     int fd;
@@ -666,7 +666,7 @@ dictType clientDictType = {
     NULL,                       /* val dup */
     dictClientKeyCompare,       /* key compare */
     .no_value = 1,              /* no values in this dict */
-    .keys_are_odd = 0           /* a client pointer is not an odd pointer */            
+    .keys_are_odd = 0           /* a client pointer is not an odd pointer */
 };
 
 /* This function is called once a background process of some kind terminates,
@@ -1555,7 +1555,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
      * a higher frequency. */
     run_with_period(1000) {
         if ((server.aof_state == AOF_ON || server.aof_state == AOF_WAIT_REWRITE) &&
-            server.aof_last_write_status == C_ERR) 
+            server.aof_last_write_status == C_ERR)
             {
                 flushAppendOnlyFile(0);
             }
@@ -1565,8 +1565,8 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     updatePausedActions();
 
     /* Replication cron function -- used to reconnect to master,
-     * detect transfer failures, start background RDB transfers and so forth. 
-     * 
+     * detect transfer failures, start background RDB transfers and so forth.
+     *
      * If Redis is trying to failover then run the replication cron faster so
      * progress on the handshake happens more quickly. */
     if (server.failover_state != NO_FAILOVER) {
@@ -1776,7 +1776,7 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
      * processUnblockedClients(), so if there are multiple pipelined WAITs
      * and the just unblocked WAIT gets blocked again, we don't have to wait
      * a server cron cycle in absence of other event loop events. See #6623.
-     * 
+     *
      * We also don't send the ACKs while clients are paused, since it can
      * increment the replication backlog, they'll be sent after the pause
      * if we are still the master. */
@@ -1786,7 +1786,7 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
     }
 
     /* We may have received updates from clients about their current offset. NOTE:
-     * this can't be done where the ACK is received since failover will disconnect 
+     * this can't be done where the ACK is received since failover will disconnect
      * our clients. */
     updateFailoverStatus();
 
@@ -2676,216 +2676,215 @@ void makeThreadKillable(void) {
 }
 
 void initServer(void) {
+    /* 初始化服务器的主函数 */
     int j;
 
-    signal(SIGHUP, SIG_IGN);
-    signal(SIGPIPE, SIG_IGN);
-    setupSignalHandlers();
-    ThreadsManager_init();
-    makeThreadKillable();
+    signal(SIGHUP, SIG_IGN);  /* 忽略SIGHUP信号 */
+    signal(SIGPIPE, SIG_IGN); /* 忽略SIGPIPE信号，避免客户端关闭连接导致服务器进程终止 */
+    setupSignalHandlers();    /* 设置其他信号处理器 */
+    ThreadsManager_init();    /* 初始化线程管理器 */
+    makeThreadKillable();     /* 使线程可被终止 */
 
     if (server.syslog_enabled) {
+        /* 如果启用了系统日志，初始化syslog */
         openlog(server.syslog_ident, LOG_PID | LOG_NDELAY | LOG_NOWAIT,
             server.syslog_facility);
     }
 
-    /* Initialization after setting defaults from the config system. */
-    server.aof_state = server.aof_enabled ? AOF_ON : AOF_OFF;
-    server.fsynced_reploff = server.aof_enabled ? 0 : -1;
-    server.hz = server.config_hz;
-    server.pid = getpid();
-    server.in_fork_child = CHILD_TYPE_NONE;
-    server.rdb_pipe_read = -1;
-    server.rdb_child_exit_pipe = -1;
-    server.main_thread_id = pthread_self();
-    server.current_client = NULL;
-    server.errors = raxNew();
-    server.errors_enabled = 1;
-    server.execution_nesting = 0;
-    server.clients = listCreate();
-    server.clients_index = raxNew();
-    server.clients_to_close = listCreate();
-    server.slaves = listCreate();
-    server.monitors = listCreate();
-    server.clients_pending_write = listCreate();
-    server.clients_pending_read = listCreate();
-    server.clients_timeout_table = raxNew();
-    server.replication_allowed = 1;
-    server.slaveseldb = -1; /* Force to emit the first SELECT command. */
-    server.unblocked_clients = listCreate();
-    server.ready_keys = listCreate();
-    server.tracking_pending_keys = listCreate();
-    server.pending_push_messages = listCreate();
-    server.clients_waiting_acks = listCreate();
-    server.get_ack_from_slaves = 0;
-    server.paused_actions = 0;
-    memset(server.client_pause_per_purpose, 0,
+    /* 从配置系统设置默认值后的初始化 */
+    server.aof_state = server.aof_enabled ? AOF_ON : AOF_OFF;  /* 根据配置设置AOF状态 */
+    server.fsynced_reploff = server.aof_enabled ? 0 : -1;       /* 已同步到磁盘的复制偏移量 */
+    server.hz = server.config_hz;                              /* 设置服务器时钟频率 */
+    server.pid = getpid();                                     /* 获取当前进程的PID */
+    server.in_fork_child = CHILD_TYPE_NONE;                    /* 初始化子进程类型为无 */
+    server.rdb_pipe_read = -1;                                 /* RDB管道读取端初始化 */
+    server.rdb_child_exit_pipe = -1;                           /* RDB子进程退出管道初始化 */
+    server.main_thread_id = pthread_self();                    /* 记录主线程ID */
+    server.current_client = NULL;                              /* 当前客户端初始化为空 */
+    server.errors = raxNew();                                  /* 创建错误记录的基数树 */
+    server.errors_enabled = 1;                                 /* 启用错误记录 */
+    server.execution_nesting = 0;                              /* 执行嵌套层级初始化 */
+    server.clients = listCreate();                             /* 创建客户端列表 */
+    server.clients_index = raxNew();                           /* 创建客户端索引 */
+    server.clients_to_close = listCreate();                    /* 创建待关闭客户端列表 */
+    server.slaves = listCreate();                              /* 创建从服务器列表 */
+    server.monitors = listCreate();                            /* 创建监控客户端列表 */
+    server.clients_pending_write = listCreate();                /* 创建待写入客户端列表 */
+    server.clients_pending_read = listCreate();                 /* 创建待读取客户端列表 */
+    server.clients_timeout_table = raxNew();                    /* 创建客户端超时表 */
+    server.replication_allowed = 1;                            /* 允许复制 */
+    server.slaveseldb = -1; /* 强制发送第一个SELECT命令 */
+    server.unblocked_clients = listCreate();                    /* 创建已解除阻塞的客户端列表 */
+    server.ready_keys = listCreate();                          /* 创建就绪键列表 */
+    server.tracking_pending_keys = listCreate();                /* 创建待处理的跟踪键列表 */
+    server.pending_push_messages = listCreate();                /* 创建待推送消息列表 */
+    server.clients_waiting_acks = listCreate();                 /* 创建等待确认的客户端列表 */
+    server.get_ack_from_slaves = 0;                            /* 从从服务器获取确认标志初始化 */
+    server.paused_actions = 0;                                 /* 暂停的操作初始化 */
+    memset(server.client_pause_per_purpose, 0,                 /* 清零按目的分类的客户端暂停数组 */
            sizeof(server.client_pause_per_purpose));
-    server.postponed_clients = listCreate();
-    server.events_processed_while_blocked = 0;
-    server.system_memory_size = zmalloc_get_memory_size();
-    server.blocked_last_cron = 0;
-    server.blocking_op_nesting = 0;
-    server.thp_enabled = 0;
-    server.cluster_drop_packet_filter = -1;
-    server.reply_buffer_peak_reset_time = REPLY_BUFFER_DEFAULT_PEAK_RESET_TIME;
-    server.reply_buffer_resizing_enabled = 1;
-    server.client_mem_usage_buckets = NULL;
-    resetReplicationBuffer();
+    server.postponed_clients = listCreate();                    /* 创建延迟处理的客户端列表 */
+    server.events_processed_while_blocked = 0;                  /* 阻塞时处理的事件计数初始化 */
+    server.system_memory_size = zmalloc_get_memory_size();      /* 获取系统内存大小 */
+    server.blocked_last_cron = 0;                              /* 最后一次阻塞时的cron时间初始化 */
+    server.blocking_op_nesting = 0;                            /* 阻塞操作嵌套层级初始化 */
+    server.thp_enabled = 0;                                    /* 透明大页默认禁用 */
+    server.cluster_drop_packet_filter = -1;                    /* 集群丢弃包过滤器初始化 */
+    server.reply_buffer_peak_reset_time = REPLY_BUFFER_DEFAULT_PEAK_RESET_TIME; /* 设置响应缓冲区峰值重置时间 */
+    server.reply_buffer_resizing_enabled = 1;                  /* 启用响应缓冲区调整大小 */
+    server.client_mem_usage_buckets = NULL;                    /* 客户端内存使用桶初始化为空 */
+    resetReplicationBuffer();                                  /* 重置复制缓冲区 */
 
-    /* Make sure the locale is set on startup based on the config file. */
+    /* 确保基于配置文件在启动时设置区域设置 */
     if (setlocale(LC_COLLATE,server.locale_collate) == NULL) {
         serverLog(LL_WARNING, "Failed to configure LOCALE for invalid locale name.");
         exit(1);
     }
 
-    createSharedObjects();
-    adjustOpenFilesLimit();
-    const char *clk_msg = monotonicInit();
-    serverLog(LL_NOTICE, "monotonic clock: %s", clk_msg);
-    server.el = aeCreateEventLoop(server.maxclients+CONFIG_FDSET_INCR);
+    createSharedObjects();                                     /* 创建共享对象，如常用的回复和错误消息 */
+    adjustOpenFilesLimit();                                    /* 调整打开文件的限制 */
+    const char *clk_msg = monotonicInit();                     /* 初始化单调时钟 */
+    serverLog(LL_NOTICE, "monotonic clock: %s", clk_msg);      /* 记录单调时钟初始化信息 */
+    server.el = aeCreateEventLoop(server.maxclients+CONFIG_FDSET_INCR); /* 创建事件循环 */
     if (server.el == NULL) {
         serverLog(LL_WARNING,
             "Failed creating the event loop. Error message: '%s'",
             strerror(errno));
         exit(1);
     }
-    server.db = zmalloc(sizeof(redisDb)*server.dbnum);
+    server.db = zmalloc(sizeof(redisDb)*server.dbnum);         /* 为数据库分配内存 */
 
-    /* Create the Redis databases, and initialize other internal state. */
-    int slot_count_bits = 0;
-    int flags = KVSTORE_ALLOCATE_DICTS_ON_DEMAND;
+    /* 创建Redis数据库，并初始化其他内部状态 */
+    int slot_count_bits = 0;                                    /* 槽位计数位初始化 */
+    int flags = KVSTORE_ALLOCATE_DICTS_ON_DEMAND;               /* 设置字典按需分配标志 */
     if (server.cluster_enabled) {
-        slot_count_bits = CLUSTER_SLOT_MASK_BITS;
-        flags |= KVSTORE_FREE_EMPTY_DICTS;
+        slot_count_bits = CLUSTER_SLOT_MASK_BITS;               /* 如果启用集群，设置槽位数 */
+        flags |= KVSTORE_FREE_EMPTY_DICTS;                      /* 允许释放空字典 */
     }
     for (j = 0; j < server.dbnum; j++) {
-        server.db[j].keys = kvstoreCreate(&dbDictType, slot_count_bits, flags | KVSTORE_ALLOC_META_KEYS_HIST);
-        server.db[j].expires = kvstoreCreate(&dbExpiresDictType, slot_count_bits, flags);
-        server.db[j].hexpires = ebCreate();
-        server.db[j].expires_cursor = 0;
-        server.db[j].blocking_keys = dictCreate(&keylistDictType);
-        server.db[j].blocking_keys_unblock_on_nokey = dictCreate(&objectKeyPointerValueDictType);
-        server.db[j].ready_keys = dictCreate(&objectKeyPointerValueDictType);
-        server.db[j].watched_keys = dictCreate(&keylistDictType);
-        server.db[j].id = j;
-        server.db[j].avg_ttl = 0;
+        server.db[j].keys = kvstoreCreate(&dbDictType, slot_count_bits, flags | KVSTORE_ALLOC_META_KEYS_HIST); /* 创建键值存储 */
+        server.db[j].expires = kvstoreCreate(&dbExpiresDictType, slot_count_bits, flags); /* 创建过期时间存储 */
+        server.db[j].hexpires = ebCreate();                     /* 创建哈希过期时间存储 */
+        server.db[j].expires_cursor = 0;                        /* 初始化过期扫描光标 */
+        server.db[j].blocking_keys = dictCreate(&keylistDictType); /* 创建阻塞键字典 */
+        server.db[j].blocking_keys_unblock_on_nokey = dictCreate(&objectKeyPointerValueDictType); /* 创建无键时解除阻塞的键字典 */
+        server.db[j].ready_keys = dictCreate(&objectKeyPointerValueDictType); /* 创建就绪键字典 */
+        server.db[j].watched_keys = dictCreate(&keylistDictType); /* 创建监视键字典 */
+        server.db[j].id = j;                                    /* 设置数据库ID */
+        server.db[j].avg_ttl = 0;                              /* 初始化平均TTL */
     }
-    evictionPoolAlloc(); /* Initialize the LRU keys pool. */
-    /* Note that server.pubsub_channels was chosen to be a kvstore (with only one dict, which
-     * seems odd) just to make the code cleaner by making it be the same type as server.pubsubshard_channels
-     * (which has to be kvstore), see pubsubtype.serverPubSubChannels */
-    server.pubsub_channels = kvstoreCreate(&objToDictDictType, 0, KVSTORE_ALLOCATE_DICTS_ON_DEMAND);
-    server.pubsub_patterns = dictCreate(&objToDictDictType);
-    server.pubsubshard_channels = kvstoreCreate(&objToDictDictType, slot_count_bits, KVSTORE_ALLOCATE_DICTS_ON_DEMAND | KVSTORE_FREE_EMPTY_DICTS);
-    server.pubsub_clients = 0;
-    server.watching_clients = 0;
-    server.cronloops = 0;
-    server.in_exec = 0;
-    server.busy_module_yield_flags = BUSY_MODULE_YIELD_NONE;
-    server.busy_module_yield_reply = NULL;
-    server.client_pause_in_transaction = 0;
-    server.child_pid = -1;
-    server.child_type = CHILD_TYPE_NONE;
-    server.rdb_child_type = RDB_CHILD_TYPE_NONE;
-    server.rdb_pipe_conns = NULL;
-    server.rdb_pipe_numconns = 0;
-    server.rdb_pipe_numconns_writing = 0;
-    server.rdb_pipe_buff = NULL;
-    server.rdb_pipe_bufflen = 0;
-    server.rdb_bgsave_scheduled = 0;
-    server.child_info_pipe[0] = -1;
-    server.child_info_pipe[1] = -1;
-    server.child_info_nread = 0;
-    server.aof_buf = sdsempty();
-    server.lastsave = time(NULL); /* At startup we consider the DB saved. */
-    server.lastbgsave_try = 0;    /* At startup we never tried to BGSAVE. */
-    server.rdb_save_time_last = -1;
-    server.rdb_save_time_start = -1;
-    server.rdb_last_load_keys_expired = 0;
-    server.rdb_last_load_keys_loaded = 0;
-    server.dirty = 0;
-    resetServerStats();
-    /* A few stats we don't want to reset: server startup time, and peak mem. */
-    server.stat_starttime = time(NULL);
-    server.stat_peak_memory = 0;
-    server.stat_current_cow_peak = 0;
-    server.stat_current_cow_bytes = 0;
-    server.stat_current_cow_updated = 0;
-    server.stat_current_save_keys_processed = 0;
-    server.stat_current_save_keys_total = 0;
-    server.stat_rdb_cow_bytes = 0;
-    server.stat_aof_cow_bytes = 0;
-    server.stat_module_cow_bytes = 0;
-    server.stat_module_progress = 0;
+    evictionPoolAlloc(); /* 初始化LRU键池 */
+    /* 注意，server.pubsub_channels被选择为kvstore(只有一个字典，看起来很奇怪)
+     * 只是为了使代码更清晰，使其与server.pubsubshard_channels类型相同
+     * (后者必须是kvstore)，参见pubsubtype.serverPubSubChannels */
+    server.pubsub_channels = kvstoreCreate(&objToDictDictType, 0, KVSTORE_ALLOCATE_DICTS_ON_DEMAND); /* 创建发布订阅通道存储 */
+    server.pubsub_patterns = dictCreate(&objToDictDictType);    /* 创建发布订阅模式字典 */
+    server.pubsubshard_channels = kvstoreCreate(&objToDictDictType, slot_count_bits, KVSTORE_ALLOCATE_DICTS_ON_DEMAND | KVSTORE_FREE_EMPTY_DICTS); /* 创建分片发布订阅通道 */
+    server.pubsub_clients = 0;                                 /* 初始化发布订阅客户端数量 */
+    server.watching_clients = 0;                              /* 初始化监视客户端数量 */
+    server.cronloops = 0;                                     /* 初始化cron循环计数 */
+    server.in_exec = 0;                                       /* 初始化执行状态 */
+    server.busy_module_yield_flags = BUSY_MODULE_YIELD_NONE;   /* 初始化模块让出标志 */
+    server.busy_module_yield_reply = NULL;                    /* 初始化模块让出回复 */
+    server.client_pause_in_transaction = 0;                   /* 初始化事务中客户端暂停状态 */
+    server.child_pid = -1;                                    /* 初始化子进程PID */
+    server.child_type = CHILD_TYPE_NONE;                      /* 初始化子进程类型 */
+    server.rdb_child_type = RDB_CHILD_TYPE_NONE;              /* 初始化RDB子进程类型 */
+    server.rdb_pipe_conns = NULL;                             /* 初始化RDB管道连接 */
+    server.rdb_pipe_numconns = 0;                             /* 初始化RDB管道连接数 */
+    server.rdb_pipe_numconns_writing = 0;                     /* 初始化RDB管道写入连接数 */
+    server.rdb_pipe_buff = NULL;                              /* 初始化RDB管道缓冲区 */
+    server.rdb_pipe_bufflen = 0;                              /* 初始化RDB管道缓冲区长度 */
+    server.rdb_bgsave_scheduled = 0;                          /* 初始化RDB后台保存调度状态 */
+    server.child_info_pipe[0] = -1;                           /* 初始化子进程信息管道读端 */
+    server.child_info_pipe[1] = -1;                           /* 初始化子进程信息管道写端 */
+    server.child_info_nread = 0;                              /* 初始化子进程信息读取字节数 */
+    server.aof_buf = sdsempty();                              /* 创建空的AOF缓冲区 */
+    server.lastsave = time(NULL); /* 启动时认为数据库已保存 */
+    server.lastbgsave_try = 0;    /* 启动时从未尝试过BGSAVE */
+    server.rdb_save_time_last = -1;                           /* 初始化上次RDB保存时间 */
+    server.rdb_save_time_start = -1;                          /* 初始化RDB保存开始时间 */
+    server.rdb_last_load_keys_expired = 0;                    /* 初始化上次加载过期键数 */
+    server.rdb_last_load_keys_loaded = 0;                     /* 初始化上次加载键数 */
+    server.dirty = 0;                                         /* 初始化脏数据计数器 */
+    resetServerStats();                                       /* 重置服务器统计信息 */
+    /* 有几个统计数据我们不想重置：服务器启动时间和峰值内存 */
+    server.stat_starttime = time(NULL);                        /* 记录服务器启动时间 */
+    server.stat_peak_memory = 0;                              /* 初始化峰值内存统计 */
+    server.stat_current_cow_peak = 0;                         /* 初始化当前写时复制峰值 */
+    server.stat_current_cow_bytes = 0;                        /* 初始化当前写时复制字节数 */
+    server.stat_current_cow_updated = 0;                      /* 初始化当前写时复制更新状态 */
+    server.stat_current_save_keys_processed = 0;              /* 初始化当前保存已处理键数 */
+    server.stat_current_save_keys_total = 0;                  /* 初始化当前保存总键数 */
+    server.stat_rdb_cow_bytes = 0;                            /* 初始化RDB写时复制字节数 */
+    server.stat_aof_cow_bytes = 0;                            /* 初始化AOF写时复制字节数 */
+    server.stat_module_cow_bytes = 0;                         /* 初始化模块写时复制字节数 */
+    server.stat_module_progress = 0;                          /* 初始化模块进度 */
     for (int j = 0; j < CLIENT_TYPE_COUNT; j++)
-        server.stat_clients_type_memory[j] = 0;
-    server.stat_cluster_links_memory = 0;
-    server.cron_malloc_stats.zmalloc_used = 0;
-    server.cron_malloc_stats.process_rss = 0;
-    server.cron_malloc_stats.allocator_allocated = 0;
-    server.cron_malloc_stats.allocator_active = 0;
-    server.cron_malloc_stats.allocator_resident = 0;
-    server.lastbgsave_status = C_OK;
-    server.aof_last_write_status = C_OK;
-    server.aof_last_write_errno = 0;
-    server.repl_good_slaves_count = 0;
-    server.last_sig_received = 0;
-    memset(server.io_threads_clients_num, 0, sizeof(server.io_threads_clients_num));
+        server.stat_clients_type_memory[j] = 0;                /* 初始化各类型客户端内存统计 */
+    server.stat_cluster_links_memory = 0;                     /* 初始化集群连接内存统计 */
+    server.cron_malloc_stats.zmalloc_used = 0;                /* 初始化cron内存分配统计-已使用 */
+    server.cron_malloc_stats.process_rss = 0;                 /* 初始化cron内存分配统计-进程RSS */
+    server.cron_malloc_stats.allocator_allocated = 0;         /* 初始化cron内存分配统计-分配器分配 */
+    server.cron_malloc_stats.allocator_active = 0;            /* 初始化cron内存分配统计-分配器活跃 */
+    server.cron_malloc_stats.allocator_resident = 0;          /* 初始化cron内存分配统计-分配器常驻 */
+    server.lastbgsave_status = C_OK;                          /* 初始化上次后台保存状态为成功 */
+    server.aof_last_write_status = C_OK;                      /* 初始化上次AOF写入状态为成功 */
+    server.aof_last_write_errno = 0;                          /* 初始化上次AOF写入错误码 */
+    server.repl_good_slaves_count = 0;                        /* 初始化正常从服务器计数 */
+    server.last_sig_received = 0;                             /* 初始化最后收到的信号 */
+    memset(server.io_threads_clients_num, 0, sizeof(server.io_threads_clients_num)); /* 清零IO线程客户端数组 */
 
-    /* Initiate acl info struct */
-    server.acl_info.invalid_cmd_accesses = 0;
-    server.acl_info.invalid_key_accesses  = 0;
-    server.acl_info.user_auth_failures = 0;
-    server.acl_info.invalid_channel_accesses = 0;
+    /* 初始化ACL信息结构 */
+    server.acl_info.invalid_cmd_accesses = 0;                  /* 初始化无效命令访问计数 */
+    server.acl_info.invalid_key_accesses  = 0;                 /* 初始化无效键访问计数 */
+    server.acl_info.user_auth_failures = 0;                    /* 初始化用户认证失败计数 */
+    server.acl_info.invalid_channel_accesses = 0;              /* 初始化无效通道访问计数 */
 
-    /* Create the timer callback, this is our way to process many background
-     * operations incrementally, like clients timeout, eviction of unaccessed
-     * expired keys and so forth. */
+    /* 创建定时器回调，这是我们处理许多后台操作的方式，
+     * 如客户端超时、驱逐未访问的过期键等等。 */
     if (aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL) == AE_ERR) {
         serverPanic("Can't create event loop timers.");
         exit(1);
     }
 
-    /* Register a readable event for the pipe used to awake the event loop
-     * from module threads. */
+    /* 为用于从模块线程唤醒事件循环的管道注册可读事件 */
     if (aeCreateFileEvent(server.el, server.module_pipe[0], AE_READABLE,
         modulePipeReadable,NULL) == AE_ERR) {
             serverPanic(
                 "Error registering the readable event for the module pipe.");
     }
 
-    /* Register before and after sleep handlers (note this needs to be done
-     * before loading persistence since it is used by processEventsWhileBlocked. */
-    aeSetBeforeSleepProc(server.el,beforeSleep);
-    aeSetAfterSleepProc(server.el,afterSleep);
+    /* 注册事件循环睡眠前后的处理程序（注意这需要在加载持久化之前完成，
+     * 因为它被processEventsWhileBlocked使用） */
+    aeSetBeforeSleepProc(server.el,beforeSleep);               /* 设置事件循环睡眠前的处理函数 */
+    aeSetAfterSleepProc(server.el,afterSleep);                 /* 设置事件循环睡眠后的处理函数 */
 
-    /* 32 bit instances are limited to 4GB of address space, so if there is
-     * no explicit limit in the user provided configuration we set a limit
-     * at 3 GB using maxmemory with 'noeviction' policy'. This avoids
-     * useless crashes of the Redis instance for out of memory. */
+    /* 32位实例的地址空间限于4GB，因此如果用户配置中没有
+     * 明确的限制，我们使用maxmemory和'noeviction'策略设置3GB的限制。
+     * 这避免了Redis实例因内存不足而无用地崩溃。 */
     if (server.arch_bits == 32 && server.maxmemory == 0) {
         serverLog(LL_WARNING,"Warning: 32 bit instance detected but no memory limit set. Setting 3 GB maxmemory limit with 'noeviction' policy now.");
         server.maxmemory = 3072LL*(1024*1024); /* 3 GB */
         server.maxmemory_policy = MAXMEMORY_NO_EVICTION;
     }
 
-    luaEnvInit();
-    scriptingInit(1);
-    if (functionsInit() == C_ERR) {
+    luaEnvInit();                                              /* 初始化Lua环境 */
+    scriptingInit(1);                                          /* 初始化脚本子系统 */
+    if (functionsInit() == C_ERR) {                            /* 初始化函数子系统 */
         serverPanic("Functions initialization failed, check the server logs.");
         exit(1);
     }
-    slowlogInit();
-    latencyMonitorInit();
+    slowlogInit();                                             /* 初始化慢查询日志 */
+    latencyMonitorInit();                                      /* 初始化延迟监控器 */
 
-    /* Initialize ACL default password if it exists */
+    /* 如果存在默认密码，初始化ACL默认用户密码 */
     ACLUpdateDefaultUserPassword(server.requirepass);
 
-    applyWatchdogPeriod();
+    applyWatchdogPeriod();                                     /* 应用看门狗周期设置 */
 
-    if (server.maxmemory_clients != 0)
-        initServerClientMemUsageBuckets();
+    if (server.maxmemory_clients != 0)                         /* 如果设置了客户端内存限制 */
+        initServerClientMemUsageBuckets();                     /* 初始化客户端内存使用桶 */
 }
 
 void initListeners(void) {
@@ -4304,12 +4303,12 @@ int processCommand(client *c) {
 
     /* If the server is paused, block the client until
      * the pause has ended. Replicas are never paused. */
-    if (!(c->flags & CLIENT_SLAVE) && 
+    if (!(c->flags & CLIENT_SLAVE) &&
         ((isPausedActions(PAUSE_ACTION_CLIENT_ALL)) ||
         ((isPausedActions(PAUSE_ACTION_CLIENT_WRITE)) && is_may_replicate_command)))
     {
         blockPostponeClient(c);
-        return C_OK;       
+        return C_OK;
     }
 
     /* Exec the command */
@@ -6365,7 +6364,7 @@ sds genRedisInfoString(dict *section_dict, int all_sections, int everything) {
     if (all_sections || (dictFind(section_dict,"keysizes") != NULL)) {
         if (sections++) info = sdscat(info,"\r\n");
         info = sdscatprintf(info, "# Keysizes\r\n");
-        
+
         char *typestr[] = {
             [OBJ_STRING] = "distrib_strings_sizes",
             [OBJ_LIST] = "distrib_lists_items",
@@ -6374,7 +6373,7 @@ sds genRedisInfoString(dict *section_dict, int all_sections, int everything) {
             [OBJ_HASH] = "distrib_hashes_items"
         };
         serverAssert(sizeof(typestr)/sizeof(typestr[0]) == OBJ_TYPE_BASIC_MAX);
-        
+
         for (int dbnum = 0; dbnum < server.dbnum; dbnum++) {
             char *expSizeLabels[] = {
                 "0", "1",   "2",  "4",  "8",  "16",  "32",  "64",  "128",  "256",  "512", /* Byte */
@@ -6385,10 +6384,10 @@ sds genRedisInfoString(dict *section_dict, int all_sections, int everything) {
                 "1P", "2P", "4P", "8P", "16P", "32P", "64P", "128P", "256P", "512P", /* Peta */
                 "1E", "2E", "4E"                                               /* Exa */
             };
-                                 
+
             if (kvstoreSize(server.db[dbnum].keys) == 0)
                 continue;
-            
+
             for (int type = 0; type < OBJ_TYPE_BASIC_MAX; type++) {
                 uint64_t *kvstoreHist = kvstoreGetMetadata(server.db[dbnum].keys)->keysizes_hist[type];
                 char buf[10000];
@@ -6398,11 +6397,11 @@ sds genRedisInfoString(dict *section_dict, int all_sections, int everything) {
                 buflen += snprintf(buf + buflen, sizeof(buf) - buflen, "db%d_%s:", dbnum, typestr[type]);
 
                 for (int i = 0; i < MAX_KEYSIZES_BINS; i++) {
-                    if (kvstoreHist[i] == 0) 
+                    if (kvstoreHist[i] == 0)
                         continue;
-                    
+
                     int res = snprintf(buf + buflen, sizeof(buf) - buflen,
-                                       (cnt == 0) ? "%s=%llu" : ",%s=%llu", 
+                                       (cnt == 0) ? "%s=%llu" : ",%s=%llu",
                                        expSizeLabels[i], (unsigned long long) kvstoreHist[i]);
                     if (res < 0) break;
                     buflen += res;
@@ -7210,20 +7209,24 @@ redisTestProc *getTestProcByName(const char *name) {
 #endif
 
 int main(int argc, char **argv) {
+    /* 主函数：Redis服务器的入口点 */
     struct timeval tv;
     int j;
-    char config_from_stdin = 0;
+    char config_from_stdin = 0; /* 标记是否从标准输入读取配置 */
 
 #ifdef REDIS_TEST
-    monotonicInit(); /* Required for dict tests, that are relying on monotime during dict rehashing. */
+    /* 测试模式初始化，当Redis以测试模式运行时执行 */
+    monotonicInit(); /* 初始化单调时钟，在字典重新哈希期间需要使用 */
     if (argc >= 3 && !strcasecmp(argv[1], "test")) {
+        /* 如果以test参数运行，进入测试模式 */
         int flags = 0;
         for (j = 3; j < argc; j++) {
             char *arg = argv[j];
-            if (!strcasecmp(arg, "--accurate")) flags |= REDIS_TEST_ACCURATE;
-            else if (!strcasecmp(arg, "--large-memory")) flags |= REDIS_TEST_LARGE_MEMORY;
-            else if (!strcasecmp(arg, "--valgrind")) flags |= REDIS_TEST_VALGRIND;
-            else if (!strcasecmp(arg, "--verbose")) flags |= REDIS_TEST_VERBOSE;
+            /* 解析测试模式的各种参数标志 */
+            if (!strcasecmp(arg, "--accurate")) flags |= REDIS_TEST_ACCURATE; /* 精确测试模式，使用更多迭代 */
+            else if (!strcasecmp(arg, "--large-memory")) flags |= REDIS_TEST_LARGE_MEMORY; /* 大内存测试模式 */
+            else if (!strcasecmp(arg, "--valgrind")) flags |= REDIS_TEST_VALGRIND; /* Valgrind测试模式 */
+            else if (!strcasecmp(arg, "--verbose")) flags |= REDIS_TEST_VERBOSE; /* 详细输出模式 */
         }
 
         if (!strcasecmp(argv[2], "all")) {
@@ -7256,69 +7259,69 @@ int main(int argc, char **argv) {
         return 0;
     }
 #endif
+#endif
 
-    /* We need to initialize our libraries, and the server configuration. */
+    /* 我们需要初始化我们的库和服务器配置 */
 #ifdef INIT_SETPROCTITLE_REPLACEMENT
     spt_init(argc, argv);
 #endif
-    tzset(); /* Populates 'timezone' global. */
+    tzset(); /* 填充全局变量'timezone' */
     zmalloc_set_oom_handler(redisOutOfMemoryHandler);
 
-    /* To achieve entropy, in case of containers, their time() and getpid() can
-     * be the same. But value of tv_usec is fast enough to make the difference */
+    /* 为了获得随机性，在容器环境中，time()和getpid()可能相同
+     * 但tv_usec的值变化足够快，可以产生差异性 */
     gettimeofday(&tv,NULL);
     srand(time(NULL)^getpid()^tv.tv_usec);
     srandom(time(NULL)^getpid()^tv.tv_usec);
     init_genrand64(((long long) tv.tv_sec * 1000000 + tv.tv_usec) ^ getpid());
     crc64_init();
 
-    /* Store umask value. Because umask(2) only offers a set-and-get API we have
-     * to reset it and restore it back. We do this early to avoid a potential
-     * race condition with threads that could be creating files or directories.
+    /* 存储umask值。因为umask(2)只提供了设置和获取的API，我们
+     * 必须重置并恢复它。我们尽早做这个以避免与可能
+     * 创建文件或目录的线程产生竞争条件。
      */
     umask(server.umask = umask(0777));
 
     uint8_t hashseed[16];
     getRandomBytes(hashseed,sizeof(hashseed));
-    dictSetHashFunctionSeed(hashseed);
+    dictSetHashFunctionSeed(hashseed); /* 设置字典哈希函数的种子 */
 
     char *exec_name = strrchr(argv[0], '/');
     if (exec_name == NULL) exec_name = argv[0];
     server.sentinel_mode = checkForSentinelMode(argc,argv, exec_name);
     initServerConfig();
-    ACLInit(); /* The ACL subsystem must be initialized ASAP because the
-                  basic networking code and client creation depends on it. */
+    ACLInit(); /* ACL子系统必须尽快初始化，因为
+                  基本的网络代码和客户端创建依赖于它。 */
     moduleInitModulesSystem();
     connTypeInitialize();
 
-    /* Store the executable path and arguments in a safe place in order
-     * to be able to restart the server later. */
+    /* 将可执行文件路径和参数存储在安全的地方，以便
+     * 能够在以后重启服务器。 */
     server.executable = getAbsolutePath(argv[0]);
     server.exec_argv = zmalloc(sizeof(char*)*(argc+1));
     server.exec_argv[argc] = NULL;
     for (j = 0; j < argc; j++) server.exec_argv[j] = zstrdup(argv[j]);
 
-    /* We need to init sentinel right now as parsing the configuration file
-     * in sentinel mode will have the effect of populating the sentinel
-     * data structures with master nodes to monitor. */
+    /* 我们需要现在就初始化sentinel，因为在sentinel模式下解析配置文件
+     * 将会填充sentinel数据结构，其中包含要监控的master节点。 */
     if (server.sentinel_mode) {
         initSentinelConfig();
         initSentinel();
     }
 
-    /* Check if we need to start in redis-check-rdb/aof mode. We just execute
-     * the program main. However the program is part of the Redis executable
-     * so that we can easily execute an RDB check on loading errors. */
+    /* 检查是否需要以redis-check-rdb/aof模式启动。我们只是执行
+     * 程序的main函数。但是该程序是Redis可执行文件的一部分，
+     * 这样我们可以在加载错误时轻松执行RDB检查。 */
     if (strstr(exec_name,"redis-check-rdb") != NULL)
         redis_check_rdb_main(argc,argv,NULL);
     else if (strstr(exec_name,"redis-check-aof") != NULL)
         redis_check_aof_main(argc,argv);
 
     if (argc >= 2) {
-        j = 1; /* First option to parse in argv[] */
+        j = 1; /* 要在argv[]中解析的第一个选项 */
         sds options = sdsempty();
 
-        /* Handle special options --help and --version */
+        /* 处理特殊选项 --help 和 --version */
         if (strcmp(argv[1], "-v") == 0 ||
             strcmp(argv[1], "--version") == 0)
         {
@@ -7341,87 +7344,87 @@ int main(int argc, char **argv) {
         } if (strcmp(argv[1], "--check-system") == 0) {
             exit(syscheck() ? 0 : 1);
         }
-        /* Parse command line options
-         * Precedence wise, File, stdin, explicit options -- last config is the one that matters.
+        /* 解析命令行选项
+         * 优先级为：文件、标准输入、显式选项 -- 最后的配置是生效的。
          *
-         * First argument is the config file name? */
+         * 第一个参数是配置文件名吗？ */
         if (argv[1][0] != '-') {
-            /* Replace the config file in server.exec_argv with its absolute path. */
+            /* 将server.exec_argv中的配置文件替换为其绝对路径。 */
             server.configfile = getAbsolutePath(argv[1]);
             zfree(server.exec_argv[1]);
             server.exec_argv[1] = zstrdup(server.configfile);
-            j = 2; // Skip this arg when parsing options
+            j = 2; // 解析选项时跳过这个参数
         }
         sds *argv_tmp;
         int argc_tmp;
         int handled_last_config_arg = 1;
         while(j < argc) {
-            /* Either first or last argument - Should we read config from stdin? */
+            /* 第一个或最后一个参数 - 我们应该从标准输入读取配置吗？ */
             if (argv[j][0] == '-' && argv[j][1] == '\0' && (j == 1 || j == argc-1)) {
                 config_from_stdin = 1;
             }
-            /* All the other options are parsed and conceptually appended to the
-             * configuration file. For instance --port 6380 will generate the
-             * string "port 6380\n" to be parsed after the actual config file
-             * and stdin input are parsed (if they exist).
-             * Only consider that if the last config has at least one argument. */
+            /* 所有其他选项都被解析并在概念上附加到
+             * 配置文件。例如 --port 6380 将生成
+             * 字符串 "port 6380\n" 在实际的配置文件
+             * 和标准输入被解析后再解析(如果它们存在)。
+             * 只考虑最后一个配置至少有一个参数的情况。 */
             else if (handled_last_config_arg && argv[j][0] == '-' && argv[j][1] == '-') {
-                /* Option name */
+                /* 选项名称 */
                 if (sdslen(options)) options = sdscat(options,"\n");
-                /* argv[j]+2 for removing the preceding `--` */
+                /* argv[j]+2 用于移除前置的 `--` */
                 options = sdscat(options,argv[j]+2);
                 options = sdscat(options," ");
 
                 argv_tmp = sdssplitargs(argv[j], &argc_tmp);
                 if (argc_tmp == 1) {
-                    /* Means that we only have one option name, like --port or "--port " */
+                    /* 意味着我们只有一个选项名称，如 --port 或 "--port " */
                     handled_last_config_arg = 0;
 
                     if ((j != argc-1) && argv[j+1][0] == '-' && argv[j+1][1] == '-' &&
                         !strcasecmp(argv[j], "--save"))
                     {
-                        /* Special case: handle some things like `--save --config value`.
-                         * In this case, if next argument starts with `--`, we will reset
-                         * handled_last_config_arg flag and append an empty "" config value
-                         * to the options, so it will become `--save "" --config value`.
-                         * We are doing it to be compatible with pre 7.0 behavior (which we
-                         * break it in #10660, 7.0.1), since there might be users who generate
-                         * a command line from an array and when it's empty that's what they produce. */
+                        /* 特殊情况：处理一些事情如 `--save --config value`。
+                         * 在这种情况下，如果下一个参数以 `--` 开头，我们将重置
+                         * handled_last_config_arg 标志并附加一个空 "" 配置值
+                         * 到选项中，这样它将变成 `--save "" --config value`。
+                         * 我们这样做是为了与7.0之前的行为兼容(我们在
+                         * #10660, 7.0.1中打破了它)，因为可能有用户从数组生成
+                         * 命令行，当它为空时就是这样生成的。 */
                         options = sdscat(options, "\"\"");
                         handled_last_config_arg = 1;
                     }
                     else if ((j == argc-1) && !strcasecmp(argv[j], "--save")) {
-                        /* Special case: when empty save is the last argument.
-                         * In this case, we append an empty "" config value to the options,
-                         * so it will become `--save ""` and will follow the same reset thing. */
+                        /* 特殊情况：当空的save是最后一个参数。
+                         * 在这种情况下，我们附加一个空 "" 配置值到选项中，
+                         * 这样它将变成 `--save ""` 并将遵循相同的重置操作。 */
                         options = sdscat(options, "\"\"");
                     }
                     else if ((j != argc-1) && argv[j+1][0] == '-' && argv[j+1][1] == '-' &&
                         !strcasecmp(argv[j], "--sentinel"))
                     {
-                        /* Special case: handle some things like `--sentinel --config value`.
-                         * It is a pseudo config option with no value. In this case, if next
-                         * argument starts with `--`, we will reset handled_last_config_arg flag.
-                         * We are doing it to be compatible with pre 7.0 behavior (which we
-                         * break it in #10660, 7.0.1). */
+                        /* 特殊情况：处理一些事情如 `--sentinel --config value`。
+                         * 它是一个没有值的伪配置选项。在这种情况下，如果下一个
+                         * 参数以 `--` 开头，我们将重置 handled_last_config_arg 标志。
+                         * 我们这样做是为了与7.0之前的行为兼容(我们在
+                         * #10660, 7.0.1中打破了它)。 */
                         options = sdscat(options, "");
                         handled_last_config_arg = 1;
                     }
                     else if ((j == argc-1) && !strcasecmp(argv[j], "--sentinel")) {
-                        /* Special case: when --sentinel is the last argument.
-                         * It is a pseudo config option with no value. In this case, do nothing.
-                         * We are doing it to be compatible with pre 7.0 behavior (which we
-                         * break it in #10660, 7.0.1). */
+                        /* 特殊情况：当--sentinel是最后一个参数。
+                         * 它是一个没有值的伪配置选项。在这种情况下，不做任何事情。
+                         * 我们这样做是为了与7.0之前的行为兼容(我们在
+                         * #10660, 7.0.1中打破了它)。 */
                         options = sdscat(options, "");
                     }
                 } else {
-                    /* Means that we are passing both config name and it's value in the same arg,
-                     * like "--port 6380", so we need to reset handled_last_config_arg flag. */
+                    /* 意味着我们正在传递配置名称及其值在同一个参数中，
+                     * 如"--port 6380"，所以我们需要重置 handled_last_config_arg 标志。 */
                     handled_last_config_arg = 1;
                 }
                 sdsfreesplitres(argv_tmp, argc_tmp);
             } else {
-                /* Option argument */
+                /* 选项参数 */
                 options = sdscatrepr(options,argv[j],strlen(argv[j]));
                 options = sdscat(options," ");
                 handled_last_config_arg = 1;
@@ -7435,7 +7438,7 @@ int main(int argc, char **argv) {
     }
     if (server.sentinel_mode) sentinelCheckConfigFile();
 
-    /* Do system checks */
+    /* 进行系统检查 */
 #ifdef __linux__
     linuxMemoryWarnings();
     sds err_msg = NULL;
@@ -7461,7 +7464,7 @@ int main(int argc, char **argv) {
 #endif /* __arm64__ */
 #endif /* __linux__ */
 
-    /* Daemonize if needed */
+    /* 如果需要，进行守护进程化 */
     server.supervised = redisIsSupervised(server.supervised_mode);
     int background = server.daemonize && !server.supervised;
     if (background) daemonize();
@@ -7508,9 +7511,9 @@ int main(int argc, char **argv) {
         loadDataFromDisk();
         aofOpenIfNeededOnServerStart();
         aofDelHistoryFiles();
-        /* While loading data, we delay applying "appendonly" config change.
-         * If there was a config change while we were inside loadDataFromDisk()
-         * above, we'll apply it here. */
+        /* 在加载数据时，我们延迟应用"appendonly"配置变更。
+         * 如果在我们在loadDataFromDisk()内部时有配置变更
+         * 上面，我们将在这里应用它。 */
         applyAppendOnlyConfig();
 
         if (server.cluster_enabled) {
@@ -7541,7 +7544,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    /* Warning the user about suspicious maxmemory setting. */
+    /* 警告用户关于可疑的maxmemory设置。 */
     if (server.maxmemory > 0 && server.maxmemory < 1024*1024) {
         serverLog(LL_WARNING,"WARNING: You specified a maxmemory value that is less than 1MB (current value is %llu bytes). Are you sure this is what you really want?", server.maxmemory);
     }

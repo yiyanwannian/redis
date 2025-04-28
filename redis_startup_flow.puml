@@ -1,0 +1,176 @@
+@startuml Redis服务器启动流程
+
+skinparam backgroundColor white
+skinparam handwritten false
+skinparam defaultFontName "Microsoft YaHei"
+skinparam defaultFontSize 14
+skinparam roundCorner 10
+skinparam dpi 100
+skinparam arrowColor #2C3E50
+skinparam noteBackgroundColor #FEFECE
+skinparam noteBorderColor #A80036
+
+title Redis服务器启动流程
+
+start
+
+:main函数入口;
+
+partition "基础初始化" {
+  :设置时区 (tzset);
+  :设置内存溢出处理器 (zmalloc_set_oom_handler);
+  :初始化随机数生成器;
+  :设置umask值;
+  :初始化字典哈希函数种子;
+}
+
+partition "检测运行模式" {
+  if (是否为Sentinel模式?) then (是)
+    :设置server.sentinel_mode = 1;
+  else (否)
+    :设置server.sentinel_mode = 0;
+  endif
+  
+  if (是否为redis-check-rdb/aof模式?) then (是)
+    :执行相应的检查工具函数;
+    stop
+  else (否)
+    :继续标准服务器启动流程;
+  endif
+}
+
+partition "服务器配置初始化" {
+  :initServerConfig() - 初始化默认配置;
+  :ACLInit() - 初始化访问控制列表;
+  :moduleInitModulesSystem() - 初始化模块系统;
+  :connTypeInitialize() - 初始化连接类型;
+  :保存可执行文件路径和参数;
+  
+  if (是否为Sentinel模式?) then (是)
+    :initSentinelConfig();
+    :initSentinel();
+  endif
+}
+
+partition "解析命令行参数和配置文件" {
+  if (是否有命令行参数?) then (是)
+    if (是否为特殊选项?) then (是)
+      :处理--help, --version等特殊选项;
+    endif
+    
+    if (第一个参数是配置文件?) then (是)
+      :记录配置文件路径;
+    endif
+    
+    :解析其他命令行选项;
+    :loadServerConfig() - 加载配置;
+  else (否)
+    :使用默认配置;
+  endif
+}
+
+partition "系统检查" {
+  note right
+    仅在Linux系统上执行
+  end note
+  
+  :linuxMemoryWarnings() - 检查内存过度提交;
+  :checkXenClocksource() - 检查时钟源;
+  :检查特定平台的内核bug;
+}
+
+partition "守护进程化" {
+  if (是否需要守护进程化?) then (是)
+    :daemonize() - 转为后台进程;
+  endif
+}
+
+:输出启动日志信息;
+
+partition "服务器初始化" {
+  :initServer() - 主要初始化函数;
+  note right
+    - 设置信号处理器
+    - 初始化线程管理器
+    - 创建共享对象
+    - 调整打开文件限制
+    - 初始化单调时钟
+    - 创建事件循环
+    - 创建数据库
+    - 创建监听套接字
+    - 创建定时器事件
+    - 初始化各种子系统
+  end note
+  
+  if (是否为后台模式或指定了pidfile?) then (是)
+    :createPidFile() - 创建PID文件;
+  endif
+  
+  if (是否设置进程标题?) then (是)
+    :redisSetProcTitle() - 设置进程标题;
+  endif
+  
+  :redisAsciiArt() - 显示ASCII艺术标志;
+  :checkTcpBacklogSettings() - 检查TCP积压设置;
+  
+  if (是否启用集群?) then (是)
+    :clusterInit() - 初始化集群;
+  endif
+  
+  if (不是Sentinel模式?) then (是)
+    :moduleInitModulesSystemLast() - 完成模块系统初始化;
+    :moduleLoadInternalModules() - 加载内部模块;
+    :moduleLoadFromQueue() - 加载外部模块;
+  endif
+  
+  :ACLLoadUsersAtStartup() - 加载ACL用户;
+  :initListeners() - 初始化监听器;
+  
+  if (是否启用集群?) then (是)
+    :clusterInitLast() - 完成集群初始化;
+  endif
+  
+  :InitServerLast() - 最终初始化;
+  note right
+    - bioInit() - 初始化后台I/O
+    - initThreadedIO() - 初始化线程化I/O
+    - 记录初始内存使用量
+  end note
+}
+
+partition "数据加载和准备接受连接" {
+  if (不是Sentinel模式?) then (是)
+    :aofLoadManifestFromDisk() - 加载AOF清单;
+    :loadDataFromDisk() - 从RDB和/或AOF加载数据;
+    :aofOpenIfNeededOnServerStart() - 打开AOF文件;
+    :aofDelHistoryFiles() - 清理历史AOF文件;
+    :applyAppendOnlyConfig() - 应用AOF配置;
+    
+    if (是否启用集群?) then (是)
+      :verifyClusterConfigWithData() - 验证集群配置;
+    endif
+    
+    :输出"Ready to accept connections"日志;
+  else (否)
+    :sentinelIsRunning() - 标记Sentinel正在运行;
+  endif
+  
+  if (是否由systemd监督?) then (是)
+    :通知systemd服务已准备好;
+  endif
+}
+
+:检查maxmemory设置;
+:redisSetCpuAffinity() - 设置CPU亲和性;
+:setOOMScoreAdj() - 调整OOM分数;
+
+:aeMain(server.el) - 启动事件循环;
+note right
+  主事件循环处理:
+  - 文件事件(客户端连接、命令执行)
+  - 时间事件(serverCron定期任务)
+end note
+
+stop
+
+@enduml

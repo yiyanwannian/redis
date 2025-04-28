@@ -1,0 +1,576 @@
+@startuml Redis数据类型实现
+
+top to bottom direction
+
+' Redis数据类型实现图
+' 描述：Redis各种数据类型的实现细节和关系
+
+title Redis数据类型实现架构
+
+ allowmixing
+
+' 定义Redis对象系统
+package "Redis对象系统" {
+  class RedisObject {
+    + type : int        ' 类型：字符串、列表、哈希、集合、有序集合等
+    + encoding : int    ' 编码方式：取决于具体数据类型和大小
+    + refcount : int    ' 引用计数：用于内存管理
+    + lru : int         ' 最近访问时间：用于LRU/LFU策略
+    + ptr : void*       ' 指向实际数据结构的指针
+    --
+    <b>Redis对象系统</b>
+    所有Redis数据类型的基础
+    src/server.h中定义
+  }
+  
+  note bottom of RedisObject
+    Redis对象系统是Redis的核心，所有数据类型都基于此实现。
+    通过type字段区分不同数据类型，通过encoding字段区分同一类型的不同编码方式。
+    ptr指向实际的数据结构，如SDS、ziplist、dict等。
+  end note
+}
+
+' 字符串类型实现
+package "字符串类型" {
+  class StringObject {
+    + encoding : int    ' 可能是INT、EMBSTR或RAW
+    + ptr : void*       ' 指向实际数据
+    --
+    <b>字符串对象</b>
+    实现路径: src/t_string.c
+  }
+  
+  class SDS {
+    + len : size_t      ' 字符串长度
+    + alloc : size_t    ' 已分配空间大小
+    + flags : uint8_t   ' 标志位
+    + buf[] : char      ' 实际字符数据
+    --
+    <b>简单动态字符串</b>
+    实现路径: src/sds.c
+  }
+  
+  note bottom of StringObject
+    字符串对象有三种编码方式：
+    1. INT: 当字符串可以表示为整数时使用
+    2. EMBSTR: 当字符串较短时(<=44字节)，将RedisObject和SDS连续分配
+    3. RAW: 当字符串较长时，RedisObject和SDS分开分配
+  end note
+  
+  note bottom of SDS
+    SDS是Redis的基本字符串实现，具有以下特点：
+    1. 二进制安全：可以存储任何二进制数据
+    2. O(1)获取字符串长度
+    3. 空间预分配：减少内存重分配次数
+    4. 惰性空间释放：避免频繁释放内存
+  end note
+}
+
+' 列表类型实现
+package "列表类型" {
+  class ListObject {
+    + encoding : int    ' 可能是QUICKLIST或LISTPACK
+    + ptr : void*       ' 指向实际数据结构
+    --
+    <b>列表对象</b>
+    实现路径: src/t_list.c
+  }
+  
+  class QuickList {
+    + head : quicklistNode*
+    + tail : quicklistNode*
+    + count : unsigned long
+    + len : unsigned long
+    + fill : int        ' 每个节点的ziplist大小限制
+    + compress : int    ' 压缩深度
+    --
+    <b>快速列表</b>
+    实现路径: src/quicklist.c
+  }
+  
+  class QuickListNode {
+    + prev : quicklistNode*
+    + next : quicklistNode*
+    + zl : unsigned char*  ' 指向ziplist
+    + sz : size_t          ' ziplist大小
+    + count : int          ' ziplist中的元素数量
+    + encoding : int       ' 编码方式(RAW或LZF)
+    --
+    <b>快速列表节点</b>
+    实现路径: src/quicklist.c
+  }
+  
+  class ZipList {
+    + zlbytes : uint32_t   ' ziplist总字节数
+    + zltail : uint32_t    ' 最后一个元素的偏移量
+    + zllen : uint16_t     ' 元素数量
+    + entry[] : 变长       ' 实际元素
+    + zlend : uint8_t      ' 结束标记(0xFF)
+    --
+    <b>压缩列表</b>
+    实现路径: src/ziplist.c
+  }
+  
+  class ListPack {
+    + total_bytes : uint32_t  ' 总字节数
+    + num_elements : uint16_t ' 元素数量
+    + entries[] : 变长        ' 实际元素
+    + end : uint8_t           ' 结束标记(0xFF)
+    --
+    <b>列表包</b>
+    实现路径: src/listpack.c
+  }
+  
+  note bottom of ListObject
+    列表对象目前主要使用QuickList编码，
+    它结合了链表和ziplist的优点，
+    既能快速访问两端元素，又能节省内存。
+    在Redis 7.0中，开始支持ListPack编码。
+  end note
+  
+  note bottom of QuickList
+    QuickList是一个由ziplist组成的双向链表，
+    每个节点是一个ziplist，可以压缩以节省内存。
+    fill参数控制每个ziplist的大小，
+    compress参数控制哪些节点需要压缩。
+  end note
+}
+
+' 哈希类型实现
+package "哈希类型" {
+  class HashObject {
+    + encoding : int    ' 可能是ZIPLIST、LISTPACK或HT
+    + ptr : void*       ' 指向实际数据结构
+    --
+    <b>哈希对象</b>
+    实现路径: src/t_hash.c
+  }
+  
+  class Dict {
+    + type : dictType*
+    + ht[2] : dictht    ' 两个哈希表，用于渐进式rehash
+    + rehashidx : long  ' 当前rehash进度，-1表示未在rehash
+    + iterators : int   ' 当前活跃的迭代器数量
+    --
+    <b>字典</b>
+    实现路径: src/dict.c
+  }
+  
+  class DictHt {
+    + table : dictEntry**  ' 哈希表数组
+    + size : unsigned long ' 哈希表大小
+    + sizemask : unsigned long ' size-1，用于计算索引
+    + used : unsigned long ' 已使用的节点数量
+    --
+    <b>哈希表</b>
+    实现路径: src/dict.c
+  }
+  
+  class DictEntry {
+    + key : void*
+    + v : union
+    + next : dictEntry*  ' 链地址法解决冲突
+    --
+    <b>哈希表节点</b>
+    实现路径: src/dict.c
+
+    note right
+          v union 可以存储以下类型：
+          - void* val
+          - uint64_t u64
+          - int64_t s64
+          - double d
+        end note
+  }
+  
+  class ZipMap {
+    + zmlen : uint8_t      ' zipmap长度(小于254时有效)
+    + entries[] : 变长     ' 键值对
+    + end : uint8_t        ' 结束标记(0xFF)
+    --
+    <b>压缩键值映射</b>
+    实现路径: src/zipmap.c
+  }
+  
+  note bottom of HashObject
+    哈希对象有两种编码方式：
+    1. 当哈希较小时，使用ziplist或listpack编码，
+       键值对连续存储，节省内存
+    2. 当哈希较大时，使用dict编码，
+       提供O(1)的查找性能
+  end note
+  
+  note bottom of Dict
+    Dict是Redis的通用字典实现，不仅用于哈希类型，
+    还用于Redis数据库本身、集合类型等。
+    支持渐进式rehash，避免一次性rehash带来的延迟。
+  end note
+  
+  note bottom of ZipMap
+    ZipMap是一种内存优化的键值存储结构，
+    专为存储少量键值对设计。
+    在早期版本的Redis中用于实现小哈希，
+    现在主要被ziplist和listpack替代。
+  end note
+}
+
+' 集合类型实现
+package "集合类型" {
+  class SetObject {
+    + encoding : int    ' 可能是INTSET或HT
+    + ptr : void*       ' 指向实际数据结构
+    --
+    <b>集合对象</b>
+    实现路径: src/t_set.c
+  }
+  
+  class IntSet {
+    + encoding : uint32_t  ' 编码方式(16/32/64位整数)
+    + length : uint32_t    ' 元素数量
+    + contents[] : int     ' 实际整数数据
+    --
+    <b>整数集合</b>
+    实现路径: src/intset.c
+  }
+  
+  note bottom of SetObject
+    集合对象有两种编码方式：
+    1. 当集合只包含整数且元素数量较少时，使用intset编码
+    2. 当集合包含非整数或元素数量较多时，使用dict编码
+       (dict的值部分为NULL)
+  end note
+  
+  note bottom of IntSet
+    IntSet是一个有序的整数数组，支持二分查找。
+    当添加的新元素类型比现有编码更大时，
+    会进行自动升级(如从16位升级到32位)。
+  end note
+}
+
+' 有序集合类型实现
+package "有序集合类型" {
+  class ZSetObject {
+    + encoding : int    ' 可能是ZIPLIST、LISTPACK或SKIPLIST
+    + ptr : void*       ' 指向实际数据结构
+    --
+    <b>有序集合对象</b>
+    实现路径: src/t_zset.c
+  }
+  
+  class ZSkipList {
+    + header : zskiplistNode*  ' 头节点
+    + tail : zskiplistNode*    ' 尾节点
+    + length : unsigned long   ' 节点数量
+    + level : int              ' 当前最大层数
+    --
+    <b>跳跃表</b>
+    实现路径: src/t_zset.c
+  }
+  
+  class ZSkipListNode {
+    + ele : sds               ' 元素值
+    + score : double          ' 分数
+    + backward : zskiplistNode* ' 后退指针+ backward : zskiplistNode*     ' 后退指针
+    + levels[] : skiplistLevel      ' 层级数组
+    --
+    note: skiplistLevel包含:
+    - forward: zskiplistNode*  ' 前进指针
+    - span: unsigned long      ' 跨度
+    --
+    <b>跳跃表节点</b>
+    实现路径: src/t_zset.c
+  }
+  
+  class ZSet {
+    + dict : dict*           ' 字典，用于O(1)查找元素
+    + zsl : zskiplist*       ' 跳跃表，用于有序访问
+    --
+    <b>有序集合</b>
+    实现路径: src/t_zset.c
+  }
+  
+  note bottom of ZSetObject
+    有序集合对象有两种编码方式：
+    1. 当元素数量较少时，使用ziplist或listpack编码
+    2. 当元素数量较多时，使用skiplist编码，
+       同时使用dict和skiplist两种结构
+  end note
+  
+  note bottom of ZSkipList
+    跳跃表是一种随机化的数据结构，平均查找复杂度为O(logN)。
+    Redis的跳跃表实现了以下特性：
+    1. 每个节点最多32层
+    2. 后退指针便于从尾到头遍历
+    3. 跨度(span)用于计算排名
+  end note
+}
+
+' 流类型实现
+package "流类型" {
+  class StreamObject {
+    + ptr : stream*       ' 指向流结构
+    --
+    <b>流对象</b>
+    实现路径: src/t_stream.c
+  }
+  
+  class Stream {
+    + rax : rax*          ' 基数树，存储消息
+    + length : uint64_t   ' 消息数量
+    + last_id : streamID  ' 最后一个消息ID
+    + cgroups : rax*      ' 消费者组
+    --
+    <b>流结构</b>
+    实现路径: src/t_stream.c
+  }
+  
+  class Rax {
+    + head : raxNode*     ' 根节点
+    + numele : size_t     ' 元素数量
+    + numnodes : size_t   ' 节点数量
+    --
+    <b>基数树</b>
+    实现路径: src/rax.c
+  }
+  
+  class StreamConsumerGroup {
+    + name : sds          ' 组名
+    + last_id : streamID  ' 最后确认的消息ID
+    + consumers : rax*    ' 消费者
+    + pel : rax*          ' 待处理消息
+    --
+    <b>消费者组</b>
+    实现路径: src/t_stream.c
+  }
+  
+  note bottom of StreamObject
+    流是Redis 5.0引入的新数据类型，
+    设计用于消息队列场景，支持：
+    1. 追加消息
+    2. 范围查询
+    3. 消费者组
+    4. 阻塞读取
+  end note
+  
+  note bottom of Rax
+    Rax是一种基数树(压缩前缀树)实现，
+    用于高效存储和检索字符串键。
+    在流中用于存储消息ID和消息内容。
+  end note
+}
+
+' 地理空间类型实现
+package "地理空间类型" {
+  class GeoObject {
+    + ptr : void*         ' 实际指向的是有序集合
+    --
+    <b>地理空间对象</b>
+    实现路径: src/geo.c
+  }
+  
+  class GeoHashBits {
+    + bits : uint64_t     ' 地理哈希值
+    + step : uint8_t      ' 精度步骤
+    --
+    <b>地理哈希位结构</b>
+    实现路径: src/geohash_helper.c
+  }
+  
+  class GeoHashRadius {
+    + hash : GeoHashBits  ' 中心点的地理哈希
+    + area : {
+        + north
+        + east
+        + west
+        + south
+      }                   ' 搜索区域的边界哈希
+    --
+    <b>地理哈希搜索半径</b>
+    实现路径: src/geohash_helper.c
+  }
+  
+  class GeoShape {
+    + type : int          ' 形状类型(圆形或矩形)
+    + xy : double[2]      ' 中心点坐标
+    + radius : double     ' 半径(圆形)
+    + height : double     ' 高度(矩形)
+    + width : double      ' 宽度(矩形)
+    + conversion : double ' 单位转换系数
+    --
+    <b>地理形状</b>
+    实现路径: src/geo.c
+  }
+  
+  note bottom of GeoObject
+    地理空间类型是通过有序集合实现的，
+    内部将二维坐标编码为一维的地理哈希值作为分数，
+    将位置名称作为有序集合的成员。
+    不是独立的底层数据结构，而是基于有序集合的接口抽象。
+  end note
+  
+  note bottom of GeoHashBits
+    地理哈希(GeoHash)是一种将二维空间坐标编码为一维字符串的算法，
+    Redis内部使用52位整数表示地理哈希，
+    用于高效地进行地理空间索引和邻近点搜索。
+  end note
+}
+
+' HyperLogLog类型实现
+package "HyperLogLog类型" {
+  class HyperLogLogObject {
+    + ptr : struct hllhdr*    ' 指向HyperLogLog头部
+    --
+    <b>HyperLogLog对象</b>
+    实现路径: src/hyperloglog.c
+  }
+  
+  class HllHeader {
+    + magic : char[4]         ' "HYLL"魔数
+    + encoding : uint8_t      ' 编码方式(密集或稀疏)
+    + notused : uint8_t[3]    ' 保留字段
+    + card : uint8_t[8]       ' 缓存的基数估计值
+    + registers[] : uint8_t   ' 实际的寄存器数据
+    --
+    <b>HyperLogLog头部</b>
+    实现路径: src/hyperloglog.c
+  }
+  
+  note bottom of HyperLogLogObject
+    HyperLogLog是一种概率数据结构，用于基数统计，
+    它能够使用固定且很小的内存(12KB)来统计
+    接近2^64个不同元素的基数，但有一定的误差率。
+    Redis提供了两种编码方式：
+    1. 密集(dense)编码：使用固定大小的16384个6位寄存器
+    2. 稀疏(sparse)编码：使用运行长度编码压缩，适用于低基数场景
+  end note
+  
+  note bottom of HllHeader
+    HyperLogLog算法通过哈希函数将元素映射到寄存器，
+    并记录哈希值中前导零的最大数量，
+    通过这些记录值可以估算出集合基数。
+    缓存的基数值可以避免重复计算，
+    提高PFCOUNT命令的性能。
+  end note
+}
+
+' 位图类型实现
+package "位图类型" {
+  class BitMapObject {
+    + ptr : void*         ' 实际指向字符串对象
+    --
+    <b>位图对象</b>
+    实现路径: src/bitops.c
+  }
+  
+  note bottom of BitMapObject
+    位图不是独立的数据类型，而是基于字符串的位操作。
+    Redis使用字符串作为位图的容器，每个字节8位，
+    可以对任意位进行设置(SETBIT)、获取(GETBIT)、计数(BITCOUNT)和查找(BITPOS)。
+    位图命令还支持按位运算(BITOP)和位域操作(BITFIELD)。
+    
+    这种实现使位图非常高效，尤其是在表示大量布尔信息时，
+    如用户签到记录、在线状态等。
+  end note
+}
+
+' 基数树实现
+' package "基数树" {
+'   class RaxObject {
+'     + ptr : rax*          ' 指向基数树结构
+'     --
+'     <b>基数树对象</b>
+'     实现路径: src/rax.c
+'   }
+  
+'   class RaxNode {
+'     + iskey : uint32_t    ' 是否是一个键的结束
+'     + isnull : uint32_t   ' 是否有关联值
+'     + iscompr : uint32_t  ' 是否是压缩节点
+'     + size : uint32_t     ' 节点大小
+'     + data[] : 变长       ' 节点数据(子节点和可能的值)
+'     --
+'     <b>基数树节点</b>
+'     实现路径: src/rax.c
+'   }
+  
+'   note bottom of RaxObject
+'     基数树(Radix Tree)是Redis内部使用的高效字符串搜索数据结构，
+'     特点是空间优化(共享前缀)和高效查找。
+    
+'     Redis的基数树实现(Rax)主要用于：
+'     1. Stream类型的消息ID索引
+'     2. 集群的槽位映射
+'     3. 某些命令的优化
+    
+'     虽然不是直接暴露给用户的数据类型，
+'     但它是Redis高效处理大量字符串键的重要组件。
+'   end note
+' }
+
+' 布隆过滤器模块
+' package "布隆过滤器" {
+'   class BloomFilterObject {
+'     + ptr : void*         ' 指向布隆过滤器数据
+'     --
+'     <b>布隆过滤器对象</b>
+'     实现路径: modules/redisbloom
+'   }
+  
+'   note bottom of BloomFilterObject
+'     布隆过滤器是一种概率数据结构，用于快速判断元素是否存在，
+'     具有空间效率高、可能误判但不会漏判的特点。
+    
+'     在Redis中，布隆过滤器不是核心数据类型，
+'     而是通过RedisBloom模块实现的，需要单独加载。
+'     主要用于防止缓存穿透、大规模数据去重等场景。
+    
+'     除了基本布隆过滤器外，RedisBloom模块还提供：
+'     1. Cuckoo过滤器(支持删除操作)
+'     2. Count-Min Sketch(频率估计)
+'     3. Top-K(高频元素)
+'   end note
+' }
+
+' 关系
+RedisObject <|-- StringObject
+RedisObject <|-- ListObject
+RedisObject <|-- HashObject
+RedisObject <|-- SetObject
+RedisObject <|-- ZSetObject
+RedisObject <|-- StreamObject
+RedisObject <|-- GeoObject
+RedisObject <|-- HyperLogLogObject
+RedisObject <|-- BitMapObject
+' RaxObject不是直接暴露的数据类型，而是内部使用
+
+StringObject *-- SDS : 使用 >
+BitMapObject *-- StringObject : 基于 >
+ListObject *-- QuickList : 使用 >
+ListObject *-- ListPack : 使用 >
+QuickList *-- QuickListNode : 包含 >
+QuickListNode *-- ZipList : 包含 >
+HashObject *-- Dict : 使用 >
+HashObject *-- ZipList : 使用 >
+HashObject *-- ListPack : 使用 >
+HashObject *-- ZipMap : 使用 >
+Dict *-- DictHt : 包含 >
+DictHt *-- DictEntry : 包含 >
+SetObject *-- Dict : 使用 >
+SetObject *-- IntSet : 使用 >
+ZSetObject *-- ZipList : 使用 >
+ZSetObject *-- ListPack : 使用 >
+ZSetObject *-- ZSet : 使用 >
+ZSet *-- Dict : 包含 >
+ZSet *-- ZSkipList : 包含 >
+ZSkipList *-- ZSkipListNode : 包含 >
+StreamObject *-- Stream : 使用 >
+Stream *-- Rax : 使用 >
+Stream *-- StreamConsumerGroup : 包含 >
+'RaxObject *-- RaxNode : 包含 >
+GeoObject *-- ZSet : 基于 >
+GeoObject *-- GeoHashBits : 使用 >
+GeoObject *-- GeoHashRadius : 使用 >
+GeoObject *-- GeoShape : 使用 >
+HyperLogLogObject *-- HllHeader : 包含 >
+
+@enduml

@@ -1,0 +1,450 @@
+@startuml Redis事件循环和网络模型
+
+' Redis事件循环和网络模型图
+' 描述：Redis的事件处理机制和网络通信模型
+
+title Redis事件循环和网络模型架构
+
+' 定义颜色
+skinparam packageStyle rectangle
+skinparam backgroundColor white
+skinparam componentStyle uml2
+
+' 事件循环核心
+package "事件循环核心" {
+  class AeEventLoop {
+    + maxfd : int                ' 最大文件描述符
+    + setsize : int              ' 事件槽大小
+    + timeEventHead : aeTimeEvent* ' 时间事件链表头
+    + events : aeFileEvent[]     ' 文件事件数组
+    + fired : aeFiredEvent[]     ' 已触发事件数组
+    + beforesleep : function     ' 事件循环睡眠前回调
+    + aftersleep : function      ' 事件循环睡眠后回调
+    + stop : int                 ' 停止标志
+    + apidata : void*            ' 多路复用API数据
+    --
+    <b>事件循环结构</b>
+    实现路径: src/ae.c
+  }
+  
+  class AeFileEvent {
+    + fd : int                   ' 文件描述符
+    + mask : int                 ' 事件类型掩码
+    + rfileProc : aeFileProc     ' 读事件处理函数
+    + wfileProc : aeFileProc     ' 写事件处理函数
+    + clientData : void*         ' 客户端数据
+    --
+    <b>文件事件结构</b>
+    实现路径: src/ae.c
+  }
+  
+  class AeTimeEvent {
+    + id : long long             ' 事件ID
+    + when_sec : long            ' 秒级触发时间
+    + when_ms : long             ' 毫秒级触发时间
+    + timeProc : aeTimeProc      ' 时间事件处理函数
+    + finalizerProc : aeEventFinalizerProc ' 终结函数
+    + clientData : void*         ' 客户端数据
+    + next : aeTimeEvent*        ' 下一个时间事件
+    --
+    <b>时间事件结构</b>
+    实现路径: src/ae.c
+  }
+  
+  class AeFiredEvent {
+    + fd : int                   ' 文件描述符
+    + mask : int                 ' 事件类型掩码
+    --
+    <b>已触发事件结构</b>
+    实现路径: src/ae.c
+  }
+  
+  note bottom of AeEventLoop
+    事件循环是Redis的核心，负责处理所有I/O事件和定时任务。
+    主要功能：
+    1. 注册和处理文件事件(如客户端连接、读写操作)
+    2. 注册和处理时间事件(如定时任务)
+    3. 调度事件处理，保持Redis的响应性
+    
+    实现路径: src/ae.c
+  end note
+}
+
+' 多路复用API
+package "多路复用API" {
+  interface AeApiState {
+    + 创建事件循环
+    + 添加事件
+    + 删除事件
+    + 获取已触发事件
+    --
+    <b>多路复用API接口</b>
+  }
+  
+  class AeApiSelect {
+    + fd_set : fdset          ' select使用的文件描述符集合
+    --
+    <b>Select实现</b>
+    实现路径: src/ae_select.c
+  }
+  
+  class AeApiEpoll {
+    + epfd : int              ' epoll文件描述符
+    + events : epoll_event[]  ' epoll事件数组
+    --
+    <b>Epoll实现</b>
+    实现路径: src/ae_epoll.c
+  }
+  
+  class AeApiKqueue {
+    + kqfd : int              ' kqueue文件描述符
+    + events : kevent[]       ' kqueue事件数组
+    --
+    <b>Kqueue实现</b>
+    实现路径: src/ae_kqueue.c
+  }
+  
+  class AeApiEvport {
+    + evport : int            ' evport文件描述符
+    + events : port_event[]   ' evport事件数组
+    --
+    <b>Evport实现</b>
+    实现路径: src/ae_evport.c
+  }
+  
+  note bottom of AeApiState
+    Redis支持多种I/O多路复用API，根据平台自动选择最高效的实现：
+    1. epoll: Linux平台
+    2. kqueue: BSD/macOS平台
+    3. evport: Solaris平台
+    4. select: 作为后备方案，适用于所有平台
+    
+    多路复用API的选择顺序：evport > epoll > kqueue > select
+  end note
+}
+
+' 网络层
+package "网络层" {
+  class Anet {
+    + anetTcpServer : function   ' 创建TCP服务器
+    + anetTcpAccept : function   ' 接受TCP连接
+    + anetRead : function        ' 读取数据
+    + anetWrite : function       ' 写入数据
+    + anetNonBlock : function    ' 设置非阻塞
+    + anetTcpNoDelay : function  ' 设置TCP_NODELAY
+    + anetKeepAlive : function   ' 设置KeepAlive
+    --
+    <b>网络操作库</b>
+    实现路径: src/anet.c
+  }
+  
+  class Connection {
+    + type : ConnectionType      ' 连接类型
+    + state : ConnectionState    ' 连接状态
+    + fd : int                   ' 文件描述符
+    + private_data : void*       ' 私有数据
+    + conn_handler : ConnectionHandler ' 连接处理函数
+    + write_handler : ConnectionCallbackFunc ' 写处理函数
+    + read_handler : ConnectionCallbackFunc ' 读处理函数
+    + conn_index : int           ' 连接索引
+    --
+    <b>连接抽象</b>
+    实现路径: src/connection.c
+  }
+  
+  enum ConnectionType {
+    + CONN_TYPE_SOCKET           ' 套接字连接
+    + CONN_TYPE_TLS              ' TLS连接
+    + CONN_TYPE_UNIX             ' Unix域套接字连接
+    + CONN_TYPE_NONE             ' 无连接
+    --
+    <b>连接类型</b>
+    实现路径: src/connection.h
+  }
+  
+  enum ConnectionState {
+    + CONN_STATE_NONE            ' 初始状态
+    + CONN_STATE_CONNECTING      ' 连接中
+    + CONN_STATE_ACCEPTING       ' 接受中
+    + CONN_STATE_CONNECTED       ' 已连接
+    + CONN_STATE_CLOSED          ' 已关闭
+    + CONN_STATE_ERROR           ' 错误状态
+    --
+    <b>连接状态</b>
+    实现路径: src/connection.h
+  }
+  
+  note bottom of Anet
+    Anet是Redis的网络操作库，提供了一组简化的网络编程接口：
+    1. 创建和管理TCP服务器
+    2. 处理客户端连接
+    3. 设置套接字选项
+    4. 读写数据
+    
+    实现路径: src/anet.c
+  end note
+  
+  note bottom of Connection
+    Connection是Redis 6.0引入的连接抽象层：
+    1. 统一管理不同类型的连接(TCP、TLS、Unix域套接字)
+    2. 提供统一的读写接口
+    3. 支持连接状态管理
+    
+    实现路径: src/connection.c
+  end note
+}
+
+' 客户端管理
+package "客户端管理" {
+  class Client {
+    + id : uint64_t              ' 客户端ID
+    + fd : int                   ' 文件描述符
+    + name : robj*               ' 客户端名称
+    + flags : int                ' 客户端标志
+    + querybuf : sds             ' 查询缓冲区
+    + argc : int                 ' 命令参数数量
+    + argv : robj**              ' 命令参数数组
+    + cmd : struct redisCommand* ' 当前命令
+    + reply : list*              ' 回复链表
+    + reply_bytes : size_t       ' 回复字节数
+    + conn : connection*         ' 连接对象
+    + ...
+    --
+    <b>客户端结构</b>
+    实现路径: src/server.h
+  }
+  
+  class ClientList {
+    + clients : list*            ' 客户端链表
+    + clients_index : rax*       ' 客户端ID索引
+    + clients_to_close : list*   ' 待关闭客户端链表
+    + clients_pending_write : list* ' 待写入客户端链表
+    + clients_pending_read : list* ' 待读取客户端链表
+    --
+    <b>客户端管理</b>
+    实现路径: src/server.c
+  }
+  
+  note bottom of Client
+    Client结构表示一个连接到Redis的客户端：
+    1. 存储客户端连接信息
+    2. 管理命令解析和执行
+    3. 处理客户端输入输出缓冲区
+    4. 跟踪客户端状态
+    
+    实现路径: src/server.h
+  end note
+  
+  note bottom of ClientList
+    Redis服务器维护多个客户端列表：
+    1. clients: 所有已连接客户端
+    2. clients_to_close: 待关闭的客户端
+    3. clients_pending_write: 有数据待写入的客户端
+    4. clients_pending_read: 有数据待读取的客户端
+    
+    实现路径: src/server.c
+  end note
+}
+
+' 命令处理
+package "命令处理" {
+  class RedisCommand {
+    + name : char*               ' 命令名称
+    + proc : redisCommandProc    ' 命令处理函数
+    + arity : int                ' 参数数量要求
+    + flags : uint64_t           ' 命令标志
+    + acl_categories : uint64_t  ' ACL类别
+    + key_specs_num : int        ' 键规范数量
+    + key_specs : keySpec*       ' 键规范数组
+    + subcommands_dict : dict*   ' 子命令字典
+    + ...
+    --
+    <b>Redis命令结构</b>
+    实现路径: src/server.h
+  }
+  
+  class CommandTable {
+    + commands : dict*           ' 命令字典
+    --
+    <b>命令表</b>
+    实现路径: src/server.c
+  }
+  
+  class CommandProcess {
+    + processCommand : function  ' 处理命令
+    + processInputBuffer : function ' 处理输入缓冲区
+    + processMultibulkBuffer : function ' 处理多条命令
+    + processInlineBuffer : function ' 处理内联命令
+    --
+    <b>命令处理流程</b>
+    实现路径: src/server.c
+  }
+  
+  note bottom of RedisCommand
+    RedisCommand结构定义了Redis命令的属性和行为：
+    1. 命令名称和处理函数
+    2. 参数要求和标志
+    3. ACL权限控制
+    4. 键规范(用于命令分析)
+    
+    实现路径: src/server.h
+  end note
+  
+  note bottom of CommandProcess
+    命令处理流程：
+    1. 从客户端输入缓冲区读取命令
+    2. 解析命令参数
+    3. 查找命令表执行对应的命令处理函数
+    4. 将命令结果写入客户端输出缓冲区
+    
+    实现路径: src/server.c
+  end note
+}
+
+' 事件处理流程
+package "事件处理流程" {
+  class MainLoop {
+    + aeMain : function          ' 主事件循环
+    + aeProcessEvents : function ' 处理事件
+    --
+    <b>主事件循环</b>
+    实现路径: src/ae.c
+  }
+  
+  class FileEventHandlers {
+    + acceptTcpHandler : function ' 接受TCP连接处理函数
+    + acceptUnixHandler : function ' 接受Unix连接处理函数
+    + readQueryFromClient : function ' 读取客户端查询
+    + sendReplyToClient : function ' 发送回复给客户端
+    --
+    <b>文件事件处理函数</b>
+    实现路径: src/server.c
+  }
+  
+  class TimeEventHandlers {
+    + serverCron : function      ' 服务器周期性任务
+    --
+    <b>时间事件处理函数</b>
+    实现路径: src/server.c
+  }
+  
+  class BeforeSleepHandler {
+    + beforeSleep : function     ' 事件循环睡眠前处理
+    --
+    <b>睡眠前处理函数</b>
+    实现路径: src/server.c
+  }
+  
+  note bottom of MainLoop
+    Redis主事件循环：
+    1. 调用aeMain进入无限循环
+    2. 调用aeProcessEvents处理文件事件和时间事件
+    3. 根据最近的时间事件计算睡眠时间
+    4. 在睡眠前后调用回调函数
+    
+    实现路径: src/ae.c
+  end note
+  
+  note bottom of FileEventHandlers
+    文件事件处理函数：
+    1. acceptTcpHandler: 接受新的TCP连接
+    2. readQueryFromClient: 读取客户端命令
+    3. sendReplyToClient: 发送命令结果
+    
+    实现路径: src/server.c
+  end note
+  
+  note bottom of TimeEventHandlers
+    时间事件处理函数：
+    1. serverCron: 服务器周期性任务，如过期键清理、统计信息更新等
+    
+    实现路径: src/server.c
+  end note
+  
+  note bottom of BeforeSleepHandler
+    睡眠前处理函数：
+    1. 处理客户端输出缓冲区
+    2. 处理AOF缓冲区
+    3. 处理复制相关任务
+    
+    实现路径: src/server.c
+  end note
+}
+
+' 多线程I/O
+package "多线程I/O" {
+  class IOThreads {
+    + io_threads : pthread_t[]   ' I/O线程数组
+    + io_threads_active : int    ' 活跃线程数
+    + io_threads_pending : list*[] ' 每个线程的待处理客户端
+    + io_threads_mutex : pthread_mutex_t ' 线程互斥锁
+    --
+    <b>I/O线程池</b>
+    实现路径: src/networking.c
+  }
+  
+  class IOThreadingMode {
+    + IO_THREADS_OP_WRITE        ' 写操作多线程
+    + IO_THREADS_OP_READ         ' 读操作多线程
+    --
+    <b>I/O线程模式</b>
+    实现路径: src/server.h
+  }
+  
+  note bottom of IOThreads
+    Redis 6.0引入的多线程I/O：
+    1. 主线程仍然负责命令处理
+    2. I/O线程负责网络读写操作
+    3. 通过io_threads_pending列表分配任务
+    4. 使用互斥锁同步线程操作
+    
+    实现路径: src/networking.c
+  end note
+  
+  note bottom of IOThreadingMode
+    I/O线程模式：
+    1. IO_THREADS_OP_WRITE: 仅写操作使用多线程
+    2. IO_THREADS_OP_READ: 读操作也使用多线程
+    
+    默认只启用写操作多线程，读操作多线程需要显式配置。
+    
+    实现路径: src/server.h
+  end note
+}
+
+' 关系
+AeEventLoop *-- AeFileEvent : 包含
+AeEventLoop *-- AeTimeEvent : 包含
+AeEventLoop *-- AeFiredEvent : 包含
+AeEventLoop --> AeApiState : 使用
+
+AeApiState <|.. AeApiSelect : 实现
+AeApiState <|.. AeApiEpoll : 实现
+AeApiState <|.. AeApiKqueue : 实现
+AeApiState <|.. AeApiEvport : 实现
+
+Anet --> AeEventLoop : 使用
+Connection --> Anet : 使用
+Connection --> ConnectionType : 使用
+Connection --> ConnectionState : 使用
+
+Client --> Connection : 使用
+ClientList *-- Client : 管理
+
+RedisCommand --> CommandProcess : 被调用
+CommandTable *-- RedisCommand : 包含
+
+MainLoop --> AeEventLoop : 使用
+MainLoop --> FileEventHandlers : 调用
+MainLoop --> TimeEventHandlers : 调用
+MainLoop --> BeforeSleepHandler : 调用
+
+FileEventHandlers --> Client : 操作
+FileEventHandlers --> CommandProcess : 调用
+TimeEventHandlers --> ClientList : 管理
+
+IOThreads --> Client : 处理I/O
+IOThreads --> IOThreadingMode : 使用
+FileEventHandlers --> IOThreads : 分配任务
+
+@enduml
