@@ -1,0 +1,175 @@
+@startuml Redis数据流程图
+
+' Redis数据流程图
+' 作者：AI助手
+' 日期：2023年
+
+autonumber
+
+title Redis数据流程图
+
+' 使用中文注释
+skinparam backgroundColor white
+skinparam handwritten false
+skinparam defaultFontName "Microsoft YaHei"
+
+' 定义参与者
+actor "客户端" as Client
+participant "网络层\n(anet.c/connection.c)" as Network
+participant "客户端管理\n(networking.c)" as ClientManager
+participant "命令处理\n(server.c)" as CommandProc
+participant "命令表\n(server.c)" as CommandTable
+participant "数据类型处理\n(t_*.c)" as DataType
+participant "对象系统\n(object.c)" as Object
+participant "数据结构\n(dict.c/sds.c等)" as DataStructure
+participant "持久化\n(aof.c/rdb.c)" as Persistence
+participant "事件循环\n(ae.c)" as EventLoop
+
+' 命令执行流程
+group 命令执行流程
+    Client -> Network: 发送命令
+    activate Network
+    
+    Network -> ClientManager: 读取客户端数据
+    activate ClientManager
+    
+    ClientManager -> ClientManager: 解析RESP协议
+    
+    ClientManager -> CommandProc: 调用processCommand()
+    activate CommandProc
+    
+    CommandProc -> CommandTable: 查找命令实现
+    activate CommandTable
+    CommandTable --> CommandProc: 返回命令函数指针
+    deactivate CommandTable
+    
+    CommandProc -> DataType: 调用命令实现函数
+    activate DataType
+    
+    DataType -> Object: 操作Redis对象
+    activate Object
+    
+    Object -> DataStructure: 操作底层数据结构
+    activate DataStructure
+    DataStructure --> Object: 返回操作结果
+    deactivate DataStructure
+    
+    Object --> DataType: 返回对象操作结果
+    deactivate Object
+    
+    DataType --> CommandProc: 返回命令执行结果
+    deactivate DataType
+    
+    CommandProc -> Persistence: 追加命令到AOF缓冲区(如果开启)
+    activate Persistence
+    Persistence --> CommandProc: 确认
+    deactivate Persistence
+    
+    CommandProc --> ClientManager: 返回命令执行结果
+    deactivate CommandProc
+    
+    ClientManager -> Network: 将结果写入客户端输出缓冲区
+    Network -> Client: 发送响应
+    deactivate Network
+    deactivate ClientManager
+end
+
+' 持久化流程
+group RDB持久化流程
+    EventLoop -> Persistence: 触发RDB保存(定时/命令)
+    activate Persistence
+    
+    Persistence -> Persistence: 创建子进程
+    
+    Persistence -> Object: 遍历所有数据库中的对象
+    activate Object
+    
+    Object -> DataStructure: 获取数据
+    activate DataStructure
+    DataStructure --> Object: 返回数据
+    deactivate DataStructure
+    
+    Object --> Persistence: 返回对象数据
+    deactivate Object
+    
+    Persistence -> Persistence: 将数据写入RDB文件
+    
+    Persistence --> EventLoop: 完成RDB保存
+    deactivate Persistence
+end
+
+' AOF持久化流程
+group AOF持久化流程
+    EventLoop -> Persistence: 触发AOF同步(定时/策略)
+    activate Persistence
+    
+    Persistence -> Persistence: 将AOF缓冲区写入文件
+    
+    Persistence --> EventLoop: 完成AOF同步
+    deactivate Persistence
+    
+    note right of Persistence
+      AOF重写过程类似RDB，
+      但会生成重建当前数据集的命令序列
+    end note
+end
+
+' 过期键处理流程
+group 过期键处理流程
+    EventLoop -> CommandProc: 定期检查过期键
+    activate CommandProc
+    
+    CommandProc -> Object: 检查键是否过期
+    activate Object
+    Object --> CommandProc: 返回过期状态
+    deactivate Object
+    
+    alt 键已过期
+        CommandProc -> DataStructure: 删除过期键
+        activate DataStructure
+        DataStructure --> CommandProc: 确认删除
+        deactivate DataStructure
+        
+        CommandProc -> Persistence: 记录DEL命令到AOF(如果开启)
+        activate Persistence
+        Persistence --> CommandProc: 确认
+        deactivate Persistence
+    end
+    
+    CommandProc --> EventLoop: 完成过期键检查
+    deactivate CommandProc
+end
+
+' 主从复制流程
+group 主从复制流程
+    participant "主节点" as Master
+    participant "从节点" as Slave
+    
+    Slave -> Master: 发送PSYNC命令
+    activate Master
+    
+    alt 首次复制或无法部分同步
+        Master -> Persistence: 生成RDB文件
+        activate Persistence
+        Persistence --> Master: 返回RDB文件
+        deactivate Persistence
+        
+        Master -> Slave: 发送RDB文件
+        
+        Slave -> Slave: 加载RDB文件
+    else 可以部分同步
+        Master -> Master: 从复制积压缓冲区获取命令
+        
+        Master -> Slave: 发送积压缓冲区中的命令
+    end
+    
+    Master -> Slave: 发送实时命令
+    deactivate Master
+    
+    note right of Master
+      主节点执行的写命令会实时
+      发送给所有从节点
+    end note
+end
+
+@enduml

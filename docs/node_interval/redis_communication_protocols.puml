@@ -1,0 +1,41 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+
+title Redis节点间通信协议
+
+package "Redis通信协议" {
+  class "RESP协议" as RESP {
+    + Redis序列化协议
+    + 客户端与服务器通信
+    + 简单高效的文本协议
+  }
+  
+  class "复制协议" as Replication {
+    + 主从节点间数据同步
+    + 全量同步(RDB传输)
+    + 增量同步(命令传播)
+    + PSYNC命令
+  }
+  
+  class "Sentinel协议" as SentinelProtocol {
+    + Sentinel节点间通信
+    + 基于Redis发布/订阅
+    + SENTINEL命令集
+    + 领导者选举
+  }
+  
+  class "集群协议" as ClusterProtocol {
+    + 集群节点间通信
+    + 集群总线(TCP)
+    + Gossip协议
+    + 槽位分配
+    + 故障检测
+  }
+}
+
+RESP <-- Replication : 基于
+RESP <-- SentinelProtocol : 基于
+RESP <-- ClusterProtocol : 基于
+
+@enduml

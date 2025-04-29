@@ -1,0 +1,48 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+
+title Redis节点类型概览
+
+package "Redis节点类型" {
+  class "单机节点" as Standalone {
+    + 独立运行
+    + 无特殊关系
+    + 处理所有读写请求
+  }
+  
+  class "主节点" as Master {
+    + 处理写请求
+    + 数据同步到从节点
+    + 可处理读请求
+  }
+  
+  class "从节点" as Slave {
+    + 从主节点复制数据
+    + 默认只读
+    + 分担读负载
+    + 可在故障时提升为主节点
+  }
+  
+  class "Sentinel节点" as Sentinel {
+    + 监控Redis节点
+    + 检测节点故障
+    + 执行故障转移
+    + 提供配置服务
+  }
+  
+  class "集群节点" as Cluster {
+    + 负责部分数据分片
+    + 参与集群状态维护
+    + 可以是主节点或从节点
+    + 通过集群总线通信
+  }
+}
+
+Standalone -[hidden]-> Master
+Master --> Slave : 数据复制
+Sentinel --> Master : 监控
+Sentinel --> Slave : 监控
+Cluster --> Cluster : 集群通信
+
+@enduml

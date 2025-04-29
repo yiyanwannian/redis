@@ -1,0 +1,36 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+
+title 集群模式节点交互流程
+
+actor "客户端\nClient" as Client
+participant "集群节点A\n(主节点)" as NodeA #LightBlue
+participant "集群节点B\n(主节点)" as NodeB #LightBlue
+participant "集群节点A'\n(从节点)" as NodeA1 #LightGreen
+
+== 集群通信 ==
+NodeA -> NodeB: PING (Gossip协议)
+NodeB --> NodeA: PONG (包含集群状态)
+NodeA -> NodeA: 更新集群状态视图
+
+NodeA -> NodeA1: PING
+NodeA1 --> NodeA: PONG
+NodeA -> NodeA: 更新集群状态视图
+
+== 数据操作 ==
+Client -> NodeA: GET key1 (key1映射到NodeA负责的槽)
+NodeA --> Client: "value1"
+
+Client -> NodeA: GET key2 (key2映射到NodeB负责的槽)
+NodeA --> Client: MOVED <slot> <ip:port>
+Client -> NodeB: GET key2
+NodeB --> Client: "value2"
+
+Client -> NodeA: SET key1 newvalue
+NodeA -> NodeA: 执行命令
+NodeA --> Client: OK
+NodeA -> NodeA1: 同步写命令
+NodeA1 -> NodeA1: 执行相同命令
+
+@enduml

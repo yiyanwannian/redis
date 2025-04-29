@@ -11,23 +11,36 @@ skinparam arrowColor #2C3E50
 skinparam noteBackgroundColor #FEFECE
 skinparam noteBorderColor #A80036
 
+autonumber
+
 title HGET命令执行流程
 
 actor "客户端" as Client
-participant "hgetCommand()" as HgetCommand
-participant "lookupKeyReadOrReply()" as LookupKeyReadOrReply
-participant "lookupKeyRead()" as LookupKeyRead
-participant "lookupKeyReadWithFlags()" as LookupKeyReadWithFlags
-participant "lookupKey()" as LookupKey
-participant "dbFindWithKeySlot()" as DbFindWithKeySlot
-participant "dbFindGenericWithKeySlot()" as DbFindGenericWithKeySlot
-participant "kvstoreDictFind()" as KvstoreDictFind
-participant "kvstoreGetDict()" as KvstoreGetDict
-participant "dictFind()" as DictFind
-participant "addHashFieldToReply()" as AddHashFieldToReply
-participant "hashTypeGetValue()" as HashTypeGetValue
-participant "hashTypeGetFromHashTable()" as HashTypeGetFromHashTable
-participant "hashTypeGetFromListpack()" as HashTypeGetFromListpack
+box "src/t_hash.c" #LightBlue
+    participant "hgetCommand()" as HgetCommand
+    participant "addHashFieldToReply()" as AddHashFieldToReply
+    participant "hashTypeGetValue()" as HashTypeGetValue
+    participant "hashTypeGetFromHashTable()" as HashTypeGetFromHashTable
+    participant "hashTypeGetFromListpack()" as HashTypeGetFromListpack
+end box
+
+box "src/db.c" #LightGreen
+    participant "lookupKeyReadOrReply()" as LookupKeyReadOrReply
+    participant "lookupKeyRead()" as LookupKeyRead
+    participant "lookupKeyReadWithFlags()" as LookupKeyReadWithFlags
+    participant "lookupKey()" as LookupKey
+    participant "dbFindWithKeySlot()" as DbFindWithKeySlot
+    participant "dbFindGenericWithKeySlot()" as DbFindGenericWithKeySlot
+end box
+
+box "src/kvstore.c" #LightYellow
+    participant "kvstoreDictFind()" as KvstoreDictFind
+    participant "kvstoreGetDict()" as KvstoreGetDict
+end box
+
+box "src/dict.c" #LightCoral
+    participant "dictFind()" as DictFind
+end box
 
 Client -> HgetCommand: 发送HGET命令
 activate HgetCommand
@@ -112,36 +125,36 @@ alt 键不存在或类型不是哈希
 else 键存在且类型是哈希
     HgetCommand -> AddHashFieldToReply: 获取哈希字段值(o, c->argv[2]->ptr)
     activate AddHashFieldToReply
-    
+
     AddHashFieldToReply -> HashTypeGetValue: 获取字段值
     activate HashTypeGetValue
-    
+
     alt 哈希使用listpack编码
         HashTypeGetValue -> HashTypeGetFromListpack: 从listpack获取字段值
         activate HashTypeGetFromListpack
-        
+
         note right of HashTypeGetFromListpack
           1. 在listpack中查找字段
           2. 获取字段对应的值
           3. 检查字段是否过期
         end note
-        
+
         HashTypeGetFromListpack --> HashTypeGetValue: 返回结果
         deactivate HashTypeGetFromListpack
     else 哈希使用哈希表编码
         HashTypeGetValue -> HashTypeGetFromHashTable: 从哈希表获取字段值
         activate HashTypeGetFromHashTable
-        
+
         note right of HashTypeGetFromHashTable
           1. 在哈希表中查找字段
           2. 获取字段对应的值
           3. 检查字段是否过期
         end note
-        
+
         HashTypeGetFromHashTable --> HashTypeGetValue: 返回结果
         deactivate HashTypeGetFromHashTable
     end
-    
+
     alt 字段过期
         HashTypeGetValue -> HashTypeGetValue: 处理过期字段
         note right
@@ -149,16 +162,16 @@ else 键存在且类型是哈希
           2. 如果是从节点，返回过期标记
         end note
     end
-    
+
     HashTypeGetValue --> AddHashFieldToReply: 返回字段值或过期标记
     deactivate HashTypeGetValue
-    
+
     alt 字段存在且未过期
         AddHashFieldToReply -> Client: 返回字段值
     else 字段不存在或已过期
         AddHashFieldToReply -> Client: 返回NULL
     end
-    
+
     deactivate AddHashFieldToReply
 end
 

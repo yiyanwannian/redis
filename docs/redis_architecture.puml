@@ -1,0 +1,616 @@
+@startuml Redis架构图
+
+' Redis项目架构图
+' 作者：AI助手
+' 日期：2023年
+
+!define RECTANGLE class
+
+title Redis架构图
+
+' 使用中文注释
+' 允许混合使用不同类型的UML元素
+allowmixing
+
+' ===== 核心服务器 =====
+package "核心服务器" as CoreServer {
+  RECTANGLE "服务器核心" as ServerCore {
+    + server : redisServer
+    + initServer()
+    + serverCron()
+    + populateCommandTable()
+    + processCommand()
+    --
+    <b>核心服务器实现</b>
+    src/server.c, src/server.h
+  }
+  
+  RECTANGLE "配置管理" as ConfigManager {
+    + loadServerConfig()
+    + configSetCommand()
+    + configGetCommand()
+    --
+    <b>配置管理</b>
+    src/config.c
+  }
+  
+  RECTANGLE "命令表" as CommandTable {
+    + commands : dict*
+    + lookupCommand()
+    + lookupCommandBySds()
+    --
+    <b>命令表管理</b>
+    src/server.c
+  }
+  
+  note bottom of ServerCore
+    Redis服务器的核心实现，包含：
+    - 服务器状态管理
+    - 命令处理
+    - 客户端连接管理
+    - 数据库管理
+    - 定期任务执行
+  end note
+}
+
+' ===== 事件处理 =====
+package "事件处理" as EventHandling {
+  RECTANGLE "事件循环" as EventLoop {
+    + aeEventLoop
+    + aeCreateEventLoop()
+    + aeProcessEvents()
+    + aeMain()
+    --
+    <b>事件循环实现</b>
+    src/ae.c
+  }
+  
+  RECTANGLE "文件事件" as FileEvents {
+    + aeFileEvent
+    + aeCreateFileEvent()
+    + aeDeleteFileEvent()
+    --
+    <b>文件事件处理</b>
+    src/ae.c
+  }
+  
+  RECTANGLE "时间事件" as TimeEvents {
+    + aeTimeEvent
+    + aeCreateTimeEvent()
+    + aeDeleteTimeEvent()
+    --
+    <b>时间事件处理</b>
+    src/ae.c
+  }
+  
+  RECTANGLE "多路复用API" as Multiplexing {
+    + aeApiCreate()
+    + aeApiPoll()
+    + aeApiName()
+    --
+    <b>多路复用实现</b>
+    src/ae_epoll.c
+    src/ae_kqueue.c
+    src/ae_select.c
+    src/ae_evport.c
+  }
+  
+  note bottom of EventLoop
+    Redis的事件处理系统：
+    - 基于反应器模式
+    - 支持多种I/O多路复用API
+    - 处理文件事件和时间事件
+    - 高效的事件调度
+  end note
+}
+
+' ===== 网络处理 =====
+package "网络处理" as Networking {
+  RECTANGLE "网络库" as Anet {
+    + anetTcpServer()
+    + anetTcpConnect()
+    + anetRead()
+    + anetWrite()
+    --
+    <b>网络库实现</b>
+    src/anet.c
+  }
+  
+  RECTANGLE "连接管理" as Connection {
+    + connection
+    + connCreate()
+    + connConnect()
+    + connRead()
+    + connWrite()
+    --
+    <b>连接管理</b>
+    src/connection.c
+  }
+  
+  RECTANGLE "客户端管理" as ClientManager {
+    + client
+    + createClient()
+    + freeClient()
+    + readQueryFromClient()
+    + sendReplyToClient()
+    --
+    <b>客户端管理</b>
+    src/networking.c
+  }
+  
+  RECTANGLE "协议解析" as Protocol {
+    + processInputBuffer()
+    + processMultibulkBuffer()
+    + processInlineBuffer()
+    --
+    <b>协议解析</b>
+    src/networking.c
+  }
+  
+  note bottom of ClientManager
+    Redis客户端管理：
+    - 客户端连接处理
+    - 命令解析和执行
+    - 回复生成和发送
+    - 客户端状态管理
+  end note
+}
+
+' ===== 数据结构 =====
+package "基础数据结构" as DataStructures {
+  RECTANGLE "动态字符串" as SDS {
+    + sds
+    + sdsNew()
+    + sdscat()
+    + sdscpy()
+    --
+    <b>动态字符串</b>
+    src/sds.c
+  }
+  
+  RECTANGLE "双端链表" as List {
+    + list
+    + listCreate()
+    + listAddNodeHead()
+    + listAddNodeTail()
+    --
+    <b>双端链表</b>
+    src/adlist.c
+  }
+  
+  RECTANGLE "字典" as Dict {
+    + dict
+    + dictCreate()
+    + dictAdd()
+    + dictFind()
+    + dictDelete()
+    --
+    <b>哈希表</b>
+    src/dict.c
+  }
+  
+  RECTANGLE "跳跃表" as SkipList {
+    + zskiplist
+    + zslCreate()
+    + zslInsert()
+    + zslDelete()
+    --
+    <b>跳跃表</b>
+    src/t_zset.c
+  }
+  
+  RECTANGLE "整数集合" as IntSet {
+    + intset
+    + intsetNew()
+    + intsetAdd()
+    + intsetRemove()
+    --
+    <b>整数集合</b>
+    src/intset.c
+  }
+  
+  RECTANGLE "压缩列表" as ZipList {
+    + ziplistNew()
+    + ziplistPush()
+    + ziplistFind()
+    + ziplistDelete()
+    --
+    <b>压缩列表</b>
+    src/ziplist.c
+  }
+  
+  note bottom of Dict
+    Redis核心数据结构：
+    - 高效的内存使用
+    - 针对不同场景优化
+    - 支持动态扩展
+    - 提供丰富的操作API
+  end note
+}
+
+' ===== 数据类型 =====
+package "Redis数据类型" as DataTypes {
+  RECTANGLE "对象系统" as RedisObject {
+    + robj
+    + createObject()
+    + freeObject()
+    + incrRefCount()
+    + decrRefCount()
+    --
+    <b>Redis对象系统</b>
+    src/object.c
+  }
+  
+  RECTANGLE "字符串" as StringType {
+    + setCommand()
+    + getCommand()
+    + incrCommand()
+    --
+    <b>字符串类型</b>
+    src/t_string.c
+  }
+  
+  RECTANGLE "列表" as ListType {
+    + lpushCommand()
+    + rpopCommand()
+    + lrangeCommand()
+    --
+    <b>列表类型</b>
+    src/t_list.c
+  }
+  
+  RECTANGLE "哈希" as HashType {
+    + hsetCommand()
+    + hgetCommand()
+    + hdelCommand()
+    --
+    <b>哈希类型</b>
+    src/t_hash.c
+  }
+  
+  RECTANGLE "集合" as SetType {
+    + saddCommand()
+    + sremCommand()
+    + sinterCommand()
+    --
+    <b>集合类型</b>
+    src/t_set.c
+  }
+  
+  RECTANGLE "有序集合" as ZSetType {
+    + zaddCommand()
+    + zrangeCommand()
+    + zremCommand()
+    --
+    <b>有序集合类型</b>
+    src/t_zset.c
+  }
+  
+  RECTANGLE "流" as StreamType {
+    + xaddCommand()
+    + xreadCommand()
+    + xrangeCommand()
+    --
+    <b>流类型</b>
+    src/t_stream.c
+  }
+  
+  note bottom of RedisObject
+    Redis数据类型：
+    - 统一的对象系统
+    - 多种编码方式
+    - 类型检查和转换
+    - 引用计数内存管理
+  end note
+}
+
+' ===== 持久化 =====
+package "持久化" as Persistence {
+  RECTANGLE "RDB持久化" as RDB {
+    + rdbSave()
+    + rdbLoad()
+    + rdbSaveBackground()
+    --
+    <b>RDB持久化</b>
+    src/rdb.c
+  }
+  
+  RECTANGLE "AOF持久化" as AOF {
+    + feedAppendOnlyFile()
+    + loadAppendOnlyFile()
+    + rewriteAppendOnlyFile()
+    --
+    <b>AOF持久化</b>
+    src/aof.c
+  }
+  
+  RECTANGLE "混合持久化" as MixedAOF {
+    + aofReadDiffFromParent()
+    + rewriteAppendOnlyFileBackground()
+    --
+    <b>混合持久化</b>
+    src/aof.c
+  }
+  
+  note bottom of RDB
+    Redis持久化系统：
+    - RDB：数据快照，适合备份
+    - AOF：命令日志，实时性好
+    - 混合持久化：结合两者优点
+    - 支持后台保存和加载
+  end note
+}
+
+' ===== 集群 =====
+package "集群" as Cluster {
+  RECTANGLE "集群管理" as ClusterManager {
+    + clusterInit()
+    + clusterCron()
+    + clusterCommand()
+    --
+    <b>集群管理</b>
+    src/cluster.c
+  }
+  
+  RECTANGLE "节点" as ClusterNode {
+    + clusterNode
+    + createClusterNode()
+    + freeClusterNode()
+    --
+    <b>集群节点</b>
+    src/cluster.c
+  }
+  
+  RECTANGLE "槽位管理" as SlotManager {
+    + clusterAddSlot()
+    + clusterDelSlot()
+    + clusterSetSlot()
+    --
+    <b>槽位管理</b>
+    src/cluster.c
+  }
+  
+  RECTANGLE "消息处理" as ClusterMsg {
+    + clusterProcessPacket()
+    + clusterSendMessage()
+    + clusterBroadcastMessage()
+    --
+    <b>集群消息</b>
+    src/cluster.c
+  }
+  
+  note bottom of ClusterManager
+    Redis集群系统：
+    - 分布式数据分片
+    - 节点自动发现
+    - 故障检测和转移
+    - 集群状态管理
+  end note
+}
+
+' ===== 复制 =====
+package "复制" as Replication {
+  RECTANGLE "主从复制" as MasterSlave {
+    + replicationFeedSlaves()
+    + syncCommand()
+    + replconfCommand()
+    --
+    <b>主从复制</b>
+    src/replication.c
+  }
+  
+  RECTANGLE "复制缓冲区" as ReplicationBuffer {
+    + replicationBacklog
+    + createReplicationBacklog()
+    + feedReplicationBacklog()
+    --
+    <b>复制缓冲区</b>
+    src/replication.c
+  }
+  
+  note bottom of MasterSlave
+    Redis复制系统：
+    - 主从数据同步
+    - 部分重同步
+    - 复制积压缓冲区
+    - 复制状态检测
+  end note
+}
+
+' ===== 哨兵 =====
+package "哨兵" as Sentinel {
+  RECTANGLE "哨兵核心" as SentinelCore {
+    + sentinelHandleConfiguration()
+    + sentinelTimer()
+    + sentinelCommand()
+    --
+    <b>哨兵核心</b>
+    src/sentinel.c
+  }
+  
+  RECTANGLE "实例监控" as SentinelMonitor {
+    + sentinelRedisInstance
+    + sentinelCreateInstanceLink()
+    + sentinelCheckSubjectivelyDown()
+    --
+    <b>实例监控</b>
+    src/sentinel.c
+  }
+  
+  RECTANGLE "故障转移" as Failover {
+    + sentinelStartFailover()
+    + sentinelFailoverStateMachine()
+    + sentinelSelectSlave()
+    --
+    <b>故障转移</b>
+    src/sentinel.c
+  }
+  
+  note bottom of SentinelCore
+    Redis哨兵系统：
+    - 监控主从实例
+    - 自动故障检测
+    - 自动故障转移
+    - 配置提供者
+  end note
+}
+
+' ===== 模块系统 =====
+package "模块系统" as Modules {
+  RECTANGLE "模块API" as ModuleAPI {
+    + moduleLoad()
+    + moduleUnload()
+    + moduleRegisterApi()
+    --
+    <b>模块API</b>
+    src/module.c
+  }
+  
+  RECTANGLE "命令注册" as ModuleCommand {
+    + RM_CreateCommand()
+    + moduleCallCommandReal()
+    --
+    <b>模块命令</b>
+    src/module.c
+  }
+  
+  RECTANGLE "数据类型" as ModuleDataType {
+    + RM_CreateDataType()
+    + moduleTypeGet()
+    + moduleTypeSet()
+    --
+    <b>模块数据类型</b>
+    src/module.c
+  }
+  
+  note bottom of ModuleAPI
+    Redis模块系统：
+    - 动态加载模块
+    - 扩展命令系统
+    - 自定义数据类型
+    - 丰富的API接口
+  end note
+}
+
+' ===== 其他组件 =====
+package "其他组件" as Others {
+  RECTANGLE "事务" as Transaction {
+    + multiCommand()
+    + execCommand()
+    + watchCommand()
+    --
+    <b>事务处理</b>
+    src/multi.c
+  }
+  
+  RECTANGLE "发布订阅" as PubSub {
+    + publishCommand()
+    + subscribeCommand()
+    + psubscribeCommand()
+    --
+    <b>发布订阅</b>
+    src/pubsub.c
+  }
+  
+  RECTANGLE "Lua脚本" as Lua {
+    + evalCommand()
+    + evalShaCommand()
+    + scriptCommand()
+    --
+    <b>Lua脚本</b>
+    src/script.c
+  }
+  
+  RECTANGLE "慢查询日志" as SlowLog {
+    + slowlogPushEntryIfNeeded()
+    + slowlogCommand()
+    --
+    <b>慢查询日志</b>
+    src/slowlog.c
+  }
+  
+  RECTANGLE "内存管理" as Memory {
+    + zmalloc()
+    + zfree()
+    + zrealloc()
+    --
+    <b>内存管理</b>
+    src/zmalloc.c
+  }
+  
+  note bottom of Memory
+    其他重要组件：
+    - 事务：ACID特性支持
+    - 发布订阅：消息通知
+    - Lua脚本：服务端脚本
+    - 内存管理：自定义分配器
+  end note
+}
+
+' ===== 关系定义 =====
+' 核心服务器关系
+ServerCore --> CommandTable : 管理
+ServerCore --> ConfigManager : 使用
+ServerCore --> EventLoop : 创建和使用
+
+' 事件处理关系
+EventLoop *-- FileEvents : 包含
+EventLoop *-- TimeEvents : 包含
+EventLoop --> Multiplexing : 使用
+
+' 网络处理关系
+ServerCore --> ClientManager : 管理
+ClientManager --> Connection : 使用
+Connection --> Anet : 使用
+ClientManager --> Protocol : 使用
+
+' 数据结构关系
+Dict --> SDS : 使用作为键
+RedisObject --> SDS : 使用作为字符串编码
+RedisObject --> Dict : 使用作为哈希编码
+RedisObject --> SkipList : 使用作为有序集合编码
+RedisObject --> ZipList : 使用作为紧凑编码
+RedisObject --> IntSet : 使用作为集合编码
+RedisObject --> List : 使用作为列表编码
+
+' 数据类型关系
+StringType --> RedisObject : 使用
+ListType --> RedisObject : 使用
+HashType --> RedisObject : 使用
+SetType --> RedisObject : 使用
+ZSetType --> RedisObject : 使用
+StreamType --> RedisObject : 使用
+
+' 持久化关系
+ServerCore --> RDB : 使用
+ServerCore --> AOF : 使用
+MixedAOF --> RDB : 使用
+MixedAOF --> AOF : 使用
+
+' 集群关系
+ServerCore --> ClusterManager : 使用
+ClusterManager *-- ClusterNode : 管理
+ClusterManager --> SlotManager : 使用
+ClusterManager --> ClusterMsg : 使用
+
+' 复制关系
+ServerCore --> MasterSlave : 使用
+MasterSlave --> ReplicationBuffer : 使用
+
+' 哨兵关系
+SentinelCore *-- SentinelMonitor : 管理
+SentinelCore --> Failover : 使用
+
+' 模块系统关系
+ServerCore --> ModuleAPI : 使用
+ModuleAPI --> ModuleCommand : 注册
+ModuleAPI --> ModuleDataType : 创建
+
+' 其他组件关系
+ServerCore --> Transaction : 处理
+ServerCore --> PubSub : 处理
+ServerCore --> Lua : 处理
+ServerCore --> SlowLog : 记录
+ServerCore --> Memory : 使用
+
+@enduml

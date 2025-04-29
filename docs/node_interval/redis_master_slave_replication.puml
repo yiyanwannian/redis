@@ -1,0 +1,43 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+autonumber
+
+title Redis主从复制工作原理
+
+participant "Redis主节点\nMaster" as Master #LightBlue
+participant "Redis从节点\nReplica" as Slave #LightGreen
+
+== 复制初始化 ==
+Slave -> Slave: 配置 replicaof <masterip> <port>
+Slave -> Master: 连接到主节点
+Master --> Slave: 接受连接
+
+== 全量同步(SYNC) ==
+Slave -> Master: PSYNC ? -1 (首次复制)
+Master -> Master: 执行BGSAVE生成RDB文件
+Master --> Slave: 发送RDB文件
+Slave -> Slave: 清空当前数据
+Slave -> Slave: 加载RDB文件
+
+== 命令传播(增量同步) ==
+Master -> Master: 执行写命令
+Master -> Master: 写入复制缓冲区
+Master --> Slave: 发送写命令
+Slave -> Slave: 执行相同的写命令
+
+== 部分重同步(PSYNC) ==
+note over Master, Slave: 网络短暂断开
+Slave -> Slave: 尝试重新连接
+Slave -> Master: PSYNC <runid> <offset>
+Master -> Master: 检查复制偏移量
+Master --> Slave: +CONTINUE <offset>
+Master --> Slave: 发送断开期间的命令
+
+== 心跳检测 ==
+Slave -> Master: REPLCONF ACK <offset>
+Master -> Master: 更新从节点复制偏移量
+Master -> Master: 检测从节点延迟
+
+@enduml

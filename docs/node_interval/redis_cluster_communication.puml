@@ -1,0 +1,42 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+
+title Redis集群节点通信原理
+
+participant "节点A\n(主节点)" as NodeA #LightBlue
+participant "节点B\n(主节点)" as NodeB #LightBlue
+participant "节点C\n(主节点)" as NodeC #LightBlue
+participant "节点A'\n(从节点)" as NodeA1 #LightGreen
+
+== 集群总线通信(Gossip协议) ==
+NodeA -> NodeB: PING (包含部分集群状态)
+NodeB --> NodeA: PONG (包含部分集群状态)
+NodeA -> NodeA: 更新集群状态视图
+
+NodeB -> NodeC: PING
+NodeC --> NodeB: PONG
+NodeB -> NodeB: 更新集群状态视图
+
+NodeC -> NodeA: PING
+NodeA --> NodeC: PONG
+NodeC -> NodeC: 更新集群状态视图
+
+== 主从复制 ==
+NodeA -> NodeA1: 数据同步
+NodeA1 -> NodeA: REPLCONF ACK
+
+== 故障检测 ==
+NodeA -> NodeB: PING (超时)
+NodeA -> NodeA: 标记NodeB为PFAIL(疑似下线)
+NodeA -> NodeC: PING (包含NodeB的PFAIL信息)
+NodeC -> NodeC: 也检测到NodeB无响应
+NodeC -> NodeC: 标记NodeB为PFAIL
+NodeC --> NodeA: PONG (确认NodeB的PFAIL状态)
+NodeA -> NodeA: 收集足够PFAIL报告
+NodeA -> NodeA: 将NodeB标记为FAIL(确认下线)
+NodeA -> NodeC: 广播NodeB的FAIL状态
+NodeC -> NodeC: 标记NodeB为FAIL
+
+@enduml

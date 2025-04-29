@@ -1,0 +1,32 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+
+title Redis主从模式架构
+
+actor "客户端\nClient" as Client
+database "Redis主节点\nMaster" as Master #LightBlue
+database "Redis从节点1\nReplica 1" as Slave1 #LightGreen
+database "Redis从节点2\nReplica 2" as Slave2 #LightGreen
+
+Client -down-> Master : 写请求
+Client -down-> Master : 读请求
+Client -down-> Slave1 : 读请求
+Client -down-> Slave2 : 读请求
+
+Master -right-> Slave1 : 数据同步
+Master -right-> Slave2 : 数据同步
+
+note right of Master
+  处理所有写操作
+  将数据变更同步到从节点
+  可以处理读操作
+end note
+
+note right of Slave1
+  只读节点
+  从主节点复制数据
+  分担读负载
+end note
+
+@enduml

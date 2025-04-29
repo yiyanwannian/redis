@@ -1,0 +1,63 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+autonumber
+
+title Redis集群故障转移流程
+
+participant "节点A\n(主节点)" as NodeA #LightBlue
+participant "节点B\n(主节点)" as NodeB #LightBlue
+participant "节点C\n(主节点)" as NodeC #LightBlue
+participant "节点B1\n(从节点)" as NodeB1 #LightGreen
+participant "节点B2\n(从节点)" as NodeB2 #LightGreen
+participant "客户端\nClient" as Client
+
+== 故障检测 ==
+note over NodeB: 节点故障
+NodeA -> NodeB: PING (超时)
+NodeA -> NodeA: 标记NodeB为PFAIL(疑似下线)
+NodeC -> NodeB: PING (超时)
+NodeC -> NodeC: 标记NodeB为PFAIL
+
+NodeA -> NodeC: PING (包含NodeB的PFAIL信息)
+NodeC --> NodeA: PONG (确认NodeB的PFAIL状态)
+NodeA -> NodeA: 收集足够PFAIL报告
+NodeA -> NodeA: 将NodeB标记为FAIL(确认下线)
+NodeA -> NodeC: 广播NodeB的FAIL状态
+NodeA -> NodeB1: 广播NodeB的FAIL状态
+NodeA -> NodeB2: 广播NodeB的FAIL状态
+NodeC -> NodeC: 标记NodeB为FAIL
+
+== 从节点选举 ==
+NodeB1 -> NodeB1: 检测到主节点NodeB已FAIL
+NodeB2 -> NodeB2: 检测到主节点NodeB已FAIL
+NodeB1 -> NodeB1: 延迟一个随机时间
+NodeB2 -> NodeB2: 延迟一个随机时间
+NodeB1 -> NodeA: FAILOVER_AUTH_REQUEST (请求选票)
+NodeB1 -> NodeC: FAILOVER_AUTH_REQUEST (请求选票)
+NodeA --> NodeB1: FAILOVER_AUTH_ACK (投票支持)
+NodeC --> NodeB1: FAILOVER_AUTH_ACK (投票支持)
+NodeB1 -> NodeB1: 获得多数选票，当选为新主节点
+
+== 从节点提升 ==
+NodeB1 -> NodeB1: 提升自己为主节点
+NodeB1 -> NodeB1: 接管NodeB的哈希槽
+NodeB1 -> NodeA: PONG (包含新角色和槽信息)
+NodeB1 -> NodeC: PONG (包含新角色和槽信息)
+NodeB1 -> NodeB2: PONG (包含新角色和槽信息)
+NodeA -> NodeA: 更新集群状态
+NodeC -> NodeC: 更新集群状态
+NodeB2 -> NodeB2: 更新集群状态
+
+NodeB2 -> NodeB1: REPLICATE (成为NodeB1的从节点)
+NodeB1 --> NodeB2: OK
+NodeB1 -> NodeB2: 同步数据
+
+== 客户端重定向 ==
+Client -> NodeA: GET key (key在NodeB负责的槽中)
+NodeA --> Client: MOVED 槽X NodeB1地址
+Client -> NodeB1: GET key
+NodeB1 --> Client: value
+
+@enduml

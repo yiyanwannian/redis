@@ -1,0 +1,128 @@
+@startuml Redis Sentinel消息交互
+
+skinparam backgroundColor white
+skinparam handwritten false
+skinparam defaultFontName "Microsoft YaHei"
+skinparam defaultFontSize 14
+skinparam sequenceArrowThickness 2
+skinparam roundCorner 10
+skinparam dpi 100
+skinparam arrowColor #2C3E50
+skinparam noteBackgroundColor #FEFECE
+skinparam noteBorderColor #A80036
+
+autonumber
+
+title Redis Sentinel 消息交互过程
+
+' 参与者定义
+participant "Sentinel A" as SA
+participant "Sentinel B" as SB
+participant "Redis主节点" as Master #LightBlue
+participant "Redis从节点1" as Slave1 #LightGreen
+participant "Redis从节点2" as Slave2 #LightGreen
+
+' 1. 正常监控过程
+group #E0E0FF "正常监控过程"
+    ' Sentinel A 监控主节点
+    SA -> Master: PING // src/sentinel.c:3075
+    Master --> SA: PONG
+    SA -> Master: INFO // src/sentinel.c:3142
+    Master --> SA: 返回INFO信息(角色、复制状态等)
+    SA -> SA: 处理INFO响应 // src/sentinel.c:2490
+
+    ' Sentinel A 监控从节点
+    SA -> Slave1: PING // src/sentinel.c:3075
+    Slave1 --> SA: PONG
+    SA -> Slave1: INFO // src/sentinel.c:3142
+    Slave1 --> SA: 返回INFO信息(角色、复制状态等)
+    SA -> SA: 处理INFO响应 // src/sentinel.c:2490
+
+    ' Sentinel A 发布hello消息
+    SA -> Master: PUBLISH __sentinel__:hello [payload] // src/sentinel.c:3030
+    Master --> SA: OK
+    Master -> SB: 转发hello消息
+    SB -> SB: 更新SA的状态信息 // src/sentinel.c:3370
+
+    ' Sentinel B 类似操作
+    SB -> Master: PING
+    Master --> SB: PONG
+    SB -> Master: INFO
+    Master --> SB: 返回INFO信息
+    SB -> Master: PUBLISH __sentinel__:hello [payload]
+    Master --> SB: OK
+    Master -> SA: 转发hello消息
+    SA -> SA: 更新SB的状态信息
+end group
+
+' 2. 故障检测过程
+group #FFE0E0 "故障检测过程"
+    note over Master: 主节点故障
+
+    ' 主观下线检测
+    SA -> Master: PING (超时) // src/sentinel.c:3075
+    SA -> Master: PING (超时)
+    SA -> SA: 标记主节点为主观下线(SDOWN) // src/sentinel.c:2476
+
+    SB -> Master: PING (超时)
+    SB -> SB: 标记主节点为主观下线(SDOWN)
+
+    ' 客观下线判定
+    SA -> SB: SENTINEL is-master-down-by-addr // src/sentinel.c:2476
+    SB --> SA: 回复主节点已下线
+    SA -> SA: 标记主节点为客观下线(ODOWN)\n(达到法定人数) // src/sentinel.c:2476
+end group
+
+' 3. 领导者选举过程
+group #E0FFE0 "领导者选举过程"
+    SA -> SB: SENTINEL is-master-down-by-addr [请求投票] // src/sentinel.c:2476
+    SB --> SA: 投票给SA
+    SA -> SA: 确认自己为领导者 // src/sentinel.c:2476
+end group
+
+' 4. 故障转移过程
+group #FFE0FF "故障转移过程"
+    ' 开始故障转移
+    SA -> SA: 开始故障转移 // src/sentinel.c:4018
+    SA -> SA: 状态: WAIT_START // src/sentinel.c:4019
+
+    ' 选择从节点
+    SA -> SA: 状态: SELECT_SLAVE // src/sentinel.c:4020
+    SA -> SA: 选择最佳从节点(Slave1) // src/sentinel.c:4013
+
+    ' 提升从节点为主节点
+    SA -> SA: 状态: SEND_SLAVEOF_NOONE // src/sentinel.c:4020
+    SA -> Slave1: SLAVEOF NO ONE // src/sentinel.c:4020
+    Slave1 --> SA: OK
+    Slave1 -> Slave1: 转变为主节点
+
+    ' 等待提升完成
+    SA -> SA: 状态: WAIT_PROMOTION // src/sentinel.c:4020
+    SA -> Slave1: INFO (检查角色) // src/sentinel.c:4020
+    Slave1 --> SA: 角色=master
+
+    ' 重新配置其他从节点
+    SA -> SA: 状态: RECONF_SLAVES // src/sentinel.c:4020
+    SA -> Slave2: SLAVEOF Slave1的IP PORT // src/sentinel.c:4020
+    Slave2 --> SA: OK
+    Slave2 -> Slave2: 重新配置为Slave1的从节点
+
+    ' 更新配置
+    SA -> SA: 状态: UPDATE_CONFIG // src/sentinel.c:4020
+    SA -> SA: 更新配置 // src/sentinel.c:4020
+end group
+
+' 5. 配置更新和通知
+group  #FFFFE0 "配置更新和通知"
+    ' 更新配置
+    SA -> SA: 发布+switch-master事件 // src/sentinel.c:4020
+    SA -> SA: 持久化配置到磁盘 // src/sentinel.c:2261
+
+    ' 通知其他Sentinel
+    SA -> Master: PUBLISH __sentinel__:hello [新配置] // src/sentinel.c:3030
+    Master -> SB: 转发hello消息
+    SB -> SB: 更新配置 // src/sentinel.c:3370
+    SB -> SB: 持久化配置到磁盘 // src/sentinel.c:2261
+end group
+
+@enduml

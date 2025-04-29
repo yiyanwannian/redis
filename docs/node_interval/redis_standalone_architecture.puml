@@ -1,0 +1,19 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+
+title Redis单机模式架构
+
+actor "客户端\nClient" as Client
+database "Redis实例\n(单机)" as Redis
+
+Client -down-> Redis : 读/写请求
+Redis -up-> Client : 响应
+
+note right of Redis
+  单个Redis实例处理所有请求
+  数据存储在单机内存中
+  没有数据冗余和高可用保障
+end note
+
+@enduml

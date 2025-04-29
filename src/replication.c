@@ -25,6 +25,18 @@
  * - RDB Channel for Full Sync  (lookup "rdb channel for full sync")
  */
 
+/*
+* replication.c - 复制管理
+*
+* 本文件包含 Redis 复制逻辑的实现，用于在主实例和副本实例之间进行数据同步。
+* 它处理以下内容：
+* - 主到副本的同步
+* - 全量和部分重新同步
+* - 复制积压管理
+* - 副本操作的状态机
+* - 用于全量同步的 RDB 通道（查找 "rdb channel for full sync"）
+*/
+
 #include "server.h"
 #include "cluster.h"
 #include "bio.h"
@@ -54,6 +66,8 @@ static void rdbChannelCleanup(void);
 /* We take a global flag to remember if this instance generated an RDB
  * because of replication, so that we can remove the RDB file in case
  * the instance is configured to have no persistence. */
+/* 我们使用一个全局标志来记录此实例是否因复制生成了 RDB，
+* 以便在实例配置为无持久化时可以删除 RDB 文件。 */
 int RDBGeneratedByReplication = 0;
 
 
@@ -134,6 +148,10 @@ char *replicationGetSlaveName(client *c) {
  * by using the fact that if there is another instance of the same file open,
  * the foreground unlink() will only remove the fs name, and deleting the
  * file's storage space will only happen once the last reference is lost. */
+/* 普通的 unlink() 调用可能会阻塞较长时间，以实际将文件删除应用到文件系统。
+* 此调用改为在后台线程中删除文件。我们实际上只是在线程中执行 close()，
+* 利用以下事实：如果同一文件的另一个实例仍然打开，
+* 前台的 unlink() 只会移除文件系统名称，而文件的存储空间只有在最后一个引用丢失后才会被删除。 */
 int bg_unlink(const char *filename) {
     int fd = open(filename,O_RDONLY|O_NONBLOCK);
     if (fd == -1) {
@@ -176,6 +194,10 @@ void createReplicationBacklog(void) {
  * so that it contains the same data as the previous one (possibly less data,
  * but the most recent bytes, or the same data and more free space in case the
  * buffer is enlarged). */
+/* 当用户在运行时修改复制积压大小时会调用此函数。
+* 该函数负责调整缓冲区的大小，并设置它以包含与之前相同的数据
+* （可能是更少的数据，但保留最新的字节，或者在缓冲区扩展的情况下，
+* 包含相同的数据并增加更多的可用空间）。 */
 void resizeReplicationBacklog(void) {
     if (server.repl_backlog_size < CONFIG_REPL_BACKLOG_MIN_SIZE)
         server.repl_backlog_size = CONFIG_REPL_BACKLOG_MIN_SIZE;
@@ -208,6 +230,8 @@ void freeReplicationBacklog(void) {
 /* To make search offset from replication buffer blocks quickly
  * when replicas ask partial resynchronization, we create one index
  * block every REPL_BACKLOG_INDEX_PER_BLOCKS blocks. */
+/* 为了在副本请求部分重新同步时快速从复制缓冲区块中搜索偏移量，
+* 我们每 REPL_BACKLOG_INDEX_PER_BLOCKS 个块创建一个索引块。 */
 void createReplicationBacklogIndex(listNode *ln) {
     server.repl_backlog->unindexed_count++;
     if (server.repl_backlog->unindexed_count >= REPL_BACKLOG_INDEX_PER_BLOCKS) {
@@ -313,6 +337,9 @@ void feedReplicationBufferWithObject(robj *o) {
  * clients disconnect, we need to free many replication buffer blocks that are
  * referenced. It would cost much time if there are a lots blocks to free, that
  * will freeze server, so we trim replication backlog incrementally. */
+/* 通常，当复制积压大小超过设置且没有副本引用它时，我们只需要修剪一个复制缓冲区块。
+* 但如果副本客户端断开连接，我们需要释放许多被引用的复制缓冲区块。
+* 如果有大量块需要释放，将会耗费大量时间并导致服务器冻结，因此我们增量地修剪复制积压。 */
 void incrementalTrimReplicationBacklog(size_t max_blocks) {
     serverAssert(server.repl_backlog != NULL);
 
@@ -329,6 +356,11 @@ void incrementalTrimReplicationBacklog(size_t max_blocks) {
          * bigger than our setting, but makes the master accept partial resync as
          * much as possible. So that backlog must be the last reference of
          * replication buffer blocks. */
+        /* 副本会增加它们引用的第一个复制缓冲区块的引用计数，
+        * 在这种情况下，即使 backlog\_histlen 超过 backlog\_size，
+        * 我们也不会修剪积压日志。这隐式地使积压日志比我们的设置更大，
+        * 但尽可能让主节点接受部分重新同步。因此，积压日志必须是
+        * 复制缓冲区块的最后一个引用。 */
         listNode *first = listFirst(server.repl_buffer_blocks);
         serverAssert(first == server.repl_backlog->ref_repl_buf_node);
         replBufBlock *fo = listNodeValue(first);

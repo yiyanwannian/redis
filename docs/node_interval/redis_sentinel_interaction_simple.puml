@@ -1,0 +1,41 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+autonumber
+
+title Sentinel模式节点交互流程
+
+participant "Sentinel节点A" as SentinelA #LightPink
+participant "Sentinel节点B" as SentinelB #LightPink
+participant "Redis主节点\nMaster" as Master #LightBlue
+participant "Redis从节点\nReplica" as Slave #LightGreen
+
+== 监控阶段 ==
+SentinelA -> Master: PING (每秒)
+Master --> SentinelA: PONG
+SentinelA -> Master: INFO (每10秒)
+Master --> SentinelA: 返回INFO信息
+
+SentinelA -> Slave: PING
+Slave --> SentinelA: PONG
+SentinelA -> Slave: INFO
+Slave --> SentinelA: 返回INFO信息
+
+== Sentinel之间的通信 ==
+SentinelA -> Master: PUBLISH __sentinel__:hello [payload]
+Master -> SentinelB: 转发hello消息
+SentinelB -> SentinelB: 更新SentinelA的状态信息
+
+SentinelB -> Master: PUBLISH __sentinel__:hello [payload]
+Master -> SentinelA: 转发hello消息
+SentinelA -> SentinelA: 更新SentinelB的状态信息
+
+== 故障检测 ==
+note over Master: 主节点故障
+SentinelA -> Master: PING (超时)
+SentinelA -> SentinelA: 标记主节点为主观下线(SDOWN)
+SentinelA -> SentinelB: SENTINEL is-master-down-by-addr
+SentinelB --> SentinelA: 回复主节点已下线
+SentinelA -> SentinelA: 标记主节点为客观下线(ODOWN)
+
+@enduml

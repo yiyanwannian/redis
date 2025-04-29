@@ -1,0 +1,71 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+autonumber
+
+title Redis Sentinel故障转移流程
+
+participant "Sentinel节点A" as SentinelA #LightPink
+participant "Sentinel节点B" as SentinelB #LightPink
+participant "Sentinel节点C" as SentinelC #LightPink
+participant "Redis主节点\nMaster" as Master #LightBlue
+participant "Redis从节点1\nReplica 1" as Slave1 #LightGreen
+participant "Redis从节点2\nReplica 2" as Slave2 #LightGreen
+participant "客户端\nClient" as Client
+
+== 领导者选举 ==
+SentinelA -> SentinelA: 增加当前纪元(current_epoch)
+SentinelA -> SentinelB: SENTINEL is-master-down-by-addr [请求投票]
+SentinelA -> SentinelC: SENTINEL is-master-down-by-addr [请求投票]
+SentinelB --> SentinelA: 投票给SentinelA
+SentinelC --> SentinelA: 投票给SentinelA
+SentinelA -> SentinelA: 确认自己为领导者
+
+== 选择新主节点 ==
+SentinelA -> SentinelA: 开始故障转移
+SentinelA -> SentinelA: 状态: WAIT_START
+SentinelA -> SentinelA: 状态: SELECT_SLAVE
+SentinelA -> Slave1: INFO
+Slave1 --> SentinelA: 返回INFO信息
+SentinelA -> Slave2: INFO
+Slave2 --> SentinelA: 返回INFO信息
+SentinelA -> SentinelA: 选择Slave1作为最佳从节点
+
+== 提升新主节点 ==
+SentinelA -> SentinelA: 状态: SEND_SLAVEOF_NOONE
+SentinelA -> Slave1: SLAVEOF NO ONE
+Slave1 --> SentinelA: OK
+Slave1 -> Slave1: 转变为主节点
+
+SentinelA -> SentinelA: 状态: WAIT_PROMOTION
+SentinelA -> Slave1: INFO
+Slave1 --> SentinelA: 角色=master
+SentinelA -> SentinelA: 确认提升成功
+
+== 重新配置其他从节点 ==
+SentinelA -> SentinelA: 状态: RECONF_SLAVES
+SentinelA -> Slave2: SLAVEOF Slave1的IP PORT
+Slave2 --> SentinelA: OK
+Slave2 -> Slave2: 重新配置为Slave1的从节点
+Slave2 -> Slave1: PSYNC
+Slave1 --> Slave2: 同步数据
+
+== 更新配置 ==
+SentinelA -> SentinelA: 状态: UPDATE_CONFIG
+SentinelA -> SentinelA: 更新配置
+SentinelA -> SentinelA: 发布+switch-master事件
+SentinelA -> SentinelA: 持久化配置到磁盘
+
+== 通知其他Sentinel和客户端 ==
+SentinelA -> SentinelB: PUBLISH __sentinel__:hello [新配置]
+SentinelA -> SentinelC: PUBLISH __sentinel__:hello [新配置]
+SentinelB -> SentinelB: 更新配置
+SentinelC -> SentinelC: 更新配置
+
+Client -> SentinelA: 获取主节点信息
+SentinelA --> Client: 返回新主节点(Slave1)地址
+Client -> Slave1: 连接到新主节点
+Slave1 --> Client: 连接成功
+
+@enduml

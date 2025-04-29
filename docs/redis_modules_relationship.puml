@@ -1,0 +1,141 @@
+@startuml Redis模块关系图
+
+' Redis模块关系图
+' 作者：AI助手
+' 日期：2023年
+
+title Redis模块关系图
+
+' 使用中文注释
+' 允许混合使用不同类型的UML元素
+allowmixing
+
+' 定义组件
+component "服务器核心\n(server.c)" as ServerCore
+component "事件循环\n(ae.c)" as EventLoop
+component "网络库\n(anet.c)" as Anet
+component "连接管理\n(connection.c)" as Connection
+component "客户端管理\n(networking.c)" as Networking
+component "命令处理\n(server.c)" as CommandProc
+component "配置管理\n(config.c)" as Config
+
+component "对象系统\n(object.c)" as Object
+component "字符串\n(t_string.c)" as String
+component "列表\n(t_list.c)" as List
+component "哈希\n(t_hash.c)" as Hash
+component "集合\n(t_set.c)" as Set
+component "有序集合\n(t_zset.c)" as ZSet
+component "流\n(t_stream.c)" as Stream
+
+component "动态字符串\n(sds.c)" as SDS
+component "双端链表\n(adlist.c)" as AdList
+component "字典\n(dict.c)" as Dict
+component "跳跃表\n(zskiplist.c)" as SkipList
+component "整数集合\n(intset.c)" as IntSet
+component "压缩列表\n(ziplist.c)" as ZipList
+
+component "RDB持久化\n(rdb.c)" as RDB
+component "AOF持久化\n(aof.c)" as AOF
+component "集群\n(cluster.c)" as Cluster
+component "复制\n(replication.c)" as Replication
+component "哨兵\n(sentinel.c)" as Sentinel
+component "模块系统\n(module.c)" as Module
+
+component "事务\n(multi.c)" as Multi
+component "发布订阅\n(pubsub.c)" as PubSub
+component "Lua脚本\n(script.c)" as Script
+component "慢查询日志\n(slowlog.c)" as SlowLog
+component "内存管理\n(zmalloc.c)" as ZMalloc
+
+' 定义依赖关系
+' 核心依赖
+ServerCore --> EventLoop : 创建和使用
+ServerCore --> Config : 加载配置
+ServerCore --> CommandProc : 处理命令
+ServerCore --> Networking : 管理客户端
+ServerCore --> Object : 管理对象
+ServerCore --> RDB : 持久化
+ServerCore --> AOF : 持久化
+ServerCore --> Cluster : 集群管理
+ServerCore --> Replication : 复制管理
+ServerCore --> Module : 加载模块
+ServerCore --> Multi : 事务处理
+ServerCore --> PubSub : 发布订阅
+ServerCore --> Script : 脚本执行
+ServerCore --> SlowLog : 记录慢查询
+
+' 网络相关依赖
+EventLoop --> Anet : 网络操作
+Networking --> Connection : 连接管理
+Connection --> Anet : 底层网络
+Networking --> CommandProc : 执行命令
+Networking --> SDS : 处理命令字符串
+
+' 命令处理依赖
+CommandProc --> String : 字符串命令
+CommandProc --> List : 列表命令
+CommandProc --> Hash : 哈希命令
+CommandProc --> Set : 集合命令
+CommandProc --> ZSet : 有序集合命令
+CommandProc --> Stream : 流命令
+CommandProc --> Multi : 事务命令
+CommandProc --> PubSub : 发布订阅命令
+CommandProc --> Script : 脚本命令
+CommandProc --> Cluster : 集群命令
+CommandProc --> SlowLog : 记录命令执行时间
+
+' 数据类型依赖
+Object --> SDS : 字符串编码
+Object --> Dict : 哈希编码
+Object --> AdList : 列表编码
+Object --> SkipList : 有序集合编码
+Object --> IntSet : 集合编码
+Object --> ZipList : 紧凑编码
+
+String --> Object : 使用对象系统
+List --> Object : 使用对象系统
+Hash --> Object : 使用对象系统
+Set --> Object : 使用对象系统
+ZSet --> Object : 使用对象系统
+Stream --> Object : 使用对象系统
+
+' 数据结构依赖
+Dict --> SDS : 键值使用
+Dict --> ZMalloc : 内存分配
+SDS --> ZMalloc : 内存分配
+AdList --> ZMalloc : 内存分配
+SkipList --> ZMalloc : 内存分配
+IntSet --> ZMalloc : 内存分配
+ZipList --> ZMalloc : 内存分配
+
+' 持久化依赖
+RDB --> Object : 序列化对象
+AOF --> Object : 记录命令
+RDB --> ZMalloc : 内存分配
+AOF --> ZMalloc : 内存分配
+
+' 集群和复制依赖
+Cluster --> Dict : 节点管理
+Cluster --> SDS : 消息处理
+Replication --> RDB : 全量同步
+Replication --> AOF : 命令传播
+Sentinel --> Networking : 监控连接
+Sentinel --> Dict : 实例管理
+
+' 模块系统依赖
+Module --> Dict : 模块注册
+Module --> Object : 数据类型
+
+' 其他组件依赖
+Multi --> Dict : 命令队列
+PubSub --> Dict : 频道管理
+Script --> Object : 脚本结果
+SlowLog --> SDS : 命令记录
+
+' 所有组件都依赖内存管理
+note bottom of ZMalloc
+  几乎所有模块都依赖zmalloc进行内存分配，
+  为简化图表，未全部显示这些依赖关系
+end note
+
+@enduml

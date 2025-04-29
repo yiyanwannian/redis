@@ -1,0 +1,49 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+
+title Redis节点状态转换
+
+state "主节点\n(Master)" as Master {
+  state "正常运行" as MasterNormal
+  state "故障" as MasterFail
+  
+  MasterNormal --> MasterFail : 节点崩溃/网络故障
+  MasterFail --> MasterNormal : 节点恢复
+}
+
+state "从节点\n(Replica)" as Replica {
+  state "复制中" as SlaveReplicating
+  state "断开连接" as SlaveDisconnected
+  state "提升为主节点" as SlavePromoted
+  
+  SlaveReplicating --> SlaveDisconnected : 连接断开
+  SlaveDisconnected --> SlaveReplicating : 重新连接
+  SlaveDisconnected --> SlavePromoted : 故障转移
+  SlavePromoted --> SlaveReplicating : 原主节点恢复
+}
+
+state "Sentinel节点" as Sentinel {
+  state "监控中" as SentinelMonitoring
+  state "故障检测" as SentinelDetecting
+  state "执行故障转移" as SentinelFailover
+  
+  SentinelMonitoring --> SentinelDetecting : 检测到异常
+  SentinelDetecting --> SentinelFailover : 确认故障
+  SentinelFailover --> SentinelMonitoring : 转移完成
+}
+
+state "集群节点" as Cluster {
+  state "正常" as ClusterNormal
+  state "疑似下线(PFAIL)" as ClusterPFail
+  state "确认下线(FAIL)" as ClusterFail
+  state "故障转移中" as ClusterFailover
+  
+  ClusterNormal --> ClusterPFail : 节点无响应
+  ClusterPFail --> ClusterFail : 多数节点确认
+  ClusterFail --> ClusterFailover : 开始故障转移
+  ClusterFailover --> ClusterNormal : 转移完成
+  ClusterPFail --> ClusterNormal : 节点恢复
+}
+
+@enduml

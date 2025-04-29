@@ -29,6 +29,24 @@
  * ----------------------------------------------------------------------------
  */
 
+/* rio.c is a simple stream-oriented I/O abstraction that provides an interface
+ * to write code that can consume/produce data using different concrete input
+ * and output devices. For instance the same rdb.c code using the rio
+ * abstraction can be used to read and write the RDB format using in-memory
+ * buffers or files.
+ *
+ * A rio object provides the following methods:
+ *  read: read from stream.
+ *  write: write to stream.
+ *  tell: get the current offset.
+ *
+ * It is also possible to set a 'checksum' method that is used by rio.c in order
+ * to compute a checksum of the data written or read, or to query the rio object
+ * for the current checksum.
+ *
+ * ----------------------------------------------------------------------------
+ */
+
 
 #include "fmacros.h"
 #include "fpconv_dtoa.h"
@@ -43,149 +61,181 @@
 
 /* ------------------------- Buffer I/O implementation ----------------------- */
 
-/* Returns 1 or 0 for success/failure. */
+/*
+ * 缓冲区写入函数
+ * 将数据追加到 SDS 字符串中，并更新位置指针
+ * 返回 1 表示成功，0 表示失败
+ */
 static size_t rioBufferWrite(rio *r, const void *buf, size_t len) {
+    /* 使用 sdscatlen 将数据追加到 SDS 字符串中 */
     r->io.buffer.ptr = sdscatlen(r->io.buffer.ptr,(char*)buf,len);
+    /* 更新位置指针 */
     r->io.buffer.pos += len;
-    return 1;
+    return 1; /* 始终成功 */
 }
 
-/* Returns 1 or 0 for success/failure. */
+/*
+ * 缓冲区读取函数
+ * 从 SDS 字符串的当前位置读取指定长度的数据
+ * 返回 1 表示成功，0 表示失败（数据不足）
+ */
 static size_t rioBufferRead(rio *r, void *buf, size_t len) {
+    /* 检查是否有足够的数据可读 */
     if (sdslen(r->io.buffer.ptr)-r->io.buffer.pos < len)
-        return 0; /* not enough buffer to return len bytes. */
+        return 0; /* 数据不足 */
+
+    /* 从当前位置复制数据 */
     memcpy(buf,r->io.buffer.ptr+r->io.buffer.pos,len);
     r->io.buffer.pos += len;
     return 1;
 }
 
-/* Returns read/write position in buffer. */
+/*
+ * 获取缓冲区当前位置
+ * 返回当前读/写位置
+ */
 static off_t rioBufferTell(rio *r) {
     return r->io.buffer.pos;
 }
 
-/* Flushes any buffer to target device if applicable. Returns 1 on success
- * and 0 on failures. */
+/*
+ * 缓冲区刷新函数
+ * 对于缓冲区 I/O，刷新操作是空操作
+ * 返回 1 表示成功
+ */
 static int rioBufferFlush(rio *r) {
     UNUSED(r);
-    return 1; /* Nothing to do, our write just appends to the buffer. */
+    return 1; /* 缓冲区 I/O 不需要刷新操作 */
 }
 
+/* 缓冲区 I/O 的 RIO 对象模板 */
 static const rio rioBufferIO = {
-    rioBufferRead,
-    rioBufferWrite,
-    rioBufferTell,
-    rioBufferFlush,
-    NULL,           /* update_checksum */
-    0,              /* current checksum */
-    0,              /* flags */
-    0,              /* bytes read or written */
-    0,              /* read/write chunk size */
-    { { NULL, 0 } } /* union for io-specific vars */
+        rioBufferRead,       /* 读取函数 */
+        rioBufferWrite,      /* 写入函数 */
+        rioBufferTell,       /* 位置查询函数 */
+        rioBufferFlush,      /* 刷新函数 */
+        NULL,                /* 校验和更新函数（默认为空） */
+        0,                   /* 当前校验和 */
+        0,                   /* 标志 */
+        0,                   /* 已处理字节数 */
+        0,                   /* 读/写块大小 */
+        { { NULL, 0 } }      /* I/O 特定变量的联合体 */
 };
 
+/*
+ * 初始化缓冲区 I/O
+ * 参数:
+ *   r: 要初始化的 RIO 对象
+ *   s: 用作缓冲区的 SDS 字符串
+ */
 void rioInitWithBuffer(rio *r, sds s) {
+    /* 复制模板 */
     *r = rioBufferIO;
+    /* 设置缓冲区指针 */
     r->io.buffer.ptr = s;
+    /* 初始化位置为 0 */
     r->io.buffer.pos = 0;
 }
 
 /* --------------------- Stdio file pointer implementation ------------------- */
 
-/* Returns 1 or 0 for success/failure. */
+/*
+ * 文件写入函数
+ * 将数据写入文件，并在启用自动同步时管理缓冲区和同步操作
+ * 返回 1 表示成功，0 表示失败
+ */
 static size_t rioFileWrite(rio *r, const void *buf, size_t len) {
+    /* 如果未启用自动同步，直接写入文件 */
     if (!r->io.file.autosync) return fwrite(buf,len,1,r->io.file.fp);
 
     size_t nwritten = 0;
-    /* Incrementally write data to the file, avoid a single write larger than
-     * the autosync threshold (so that the kernel's buffer cache never has too
-     * many dirty pages at once). */
-    while (len != nwritten) {
-        serverAssert(r->io.file.autosync > r->io.file.buffered);
-        size_t nalign = (size_t)(r->io.file.autosync - r->io.file.buffered);
-        size_t towrite = nalign > len-nwritten ? len-nwritten : nalign;
 
-        if (fwrite((char*)buf+nwritten,towrite,1,r->io.file.fp) == 0) return 0;
-        nwritten += towrite;
-        r->io.file.buffered += towrite;
+    /* 写入文件 */
+    if (fwrite(buf,len,1,r->io.file.fp) == 0) return 0;
+    nwritten += len;
 
-        if (r->io.file.buffered >= r->io.file.autosync) {
-            fflush(r->io.file.fp);
+    /* 更新已缓冲的字节数 */
+    r->io.file.buffered += len;
 
-            size_t processed = r->processed_bytes + nwritten;
-            serverAssert(processed % r->io.file.autosync == 0);
-            serverAssert(r->io.file.buffered == r->io.file.autosync);
+    /* 如果缓冲的数据超过了自动同步阈值，则执行同步 */
+    if (r->io.file.autosync && r->io.file.buffered >= r->io.file.autosync) {
+        /* 刷新文件缓冲区 */
+        fflush(r->io.file.fp);
 
-#if HAVE_SYNC_FILE_RANGE
-            /* Start writeout asynchronously. */
-            if (sync_file_range(fileno(r->io.file.fp),
-                    processed - r->io.file.autosync, r->io.file.autosync,
-                    SYNC_FILE_RANGE_WRITE) == -1)
-                return 0;
-
-            if (processed >= (size_t)r->io.file.autosync * 2) {
-                /* To keep the promise to 'autosync', we should make sure last
-                 * asynchronous writeout persists into disk. This call may block
-                 * if last writeout is not finished since disk is slow. */
-                if (sync_file_range(fileno(r->io.file.fp),
-                        processed - r->io.file.autosync*2,
-                        r->io.file.autosync, SYNC_FILE_RANGE_WAIT_BEFORE|
-                        SYNC_FILE_RANGE_WRITE|SYNC_FILE_RANGE_WAIT_AFTER) == -1)
-                    return 0;
-            }
-#else
-            if (redis_fsync(fileno(r->io.file.fp)) == -1) return 0;
-#endif
-            if (r->io.file.reclaim_cache) {
-                /* In Linux sync_file_range just issue a writeback request to
-                 * OS, and when posix_fadvise is called, the dirty page may
-                 * still be in flushing, which means it would be ignored by
-                 * posix_fadvise.
-                 * 
-                 * So we posix_fadvise the whole file, and the writeback-ed 
-                 * pages will have other chances to be reclaimed. */
-                reclaimFilePageCache(fileno(r->io.file.fp), 0, 0);
-            }
-            r->io.file.buffered = 0;
+        /* 根据配置决定是否回收页面缓存 */
+        if (r->io.file.reclaim_cache) {
+            /* 同步文件到磁盘 */
+            redis_fsync(fileno(r->io.file.fp));
+            /* 回收页面缓存 */
+            reclaimFilePageCache(fileno(r->io.file.fp), 0, 0);
+        } else {
+            /* 只同步文件到磁盘 */
+            redis_fsync(fileno(r->io.file.fp));
         }
+
+        /* 重置缓冲计数器 */
+        r->io.file.buffered = 0;
     }
+
     return 1;
 }
 
-/* Returns 1 or 0 for success/failure. */
+/*
+ * 文件读取函数
+ * 从文件读取指定长度的数据
+ * 返回 1 表示成功，0 表示失败
+ */
 static size_t rioFileRead(rio *r, void *buf, size_t len) {
     return fread(buf,len,1,r->io.file.fp);
 }
 
-/* Returns read/write position in file. */
+/*
+ * 获取文件当前位置
+ * 返回文件指针的当前位置
+ */
 static off_t rioFileTell(rio *r) {
     return ftello(r->io.file.fp);
 }
 
-/* Flushes any buffer to target device if applicable. Returns 1 on success
- * and 0 on failures. */
+/*
+ * 文件刷新函数
+ * 刷新文件缓冲区到磁盘
+ * 返回 1 表示成功，0 表示失败
+ */
 static int rioFileFlush(rio *r) {
     return (fflush(r->io.file.fp) == 0) ? 1 : 0;
 }
 
+/* 文件 I/O 的 RIO 对象模板 */
 static const rio rioFileIO = {
-    rioFileRead,
-    rioFileWrite,
-    rioFileTell,
-    rioFileFlush,
-    NULL,           /* update_checksum */
-    0,              /* current checksum */
-    0,              /* flags */
-    0,              /* bytes read or written */
-    0,              /* read/write chunk size */
-    { { NULL, 0 } } /* union for io-specific vars */
+        rioFileRead,         /* 读取函数 */
+        rioFileWrite,        /* 写入函数 */
+        rioFileTell,         /* 位置查询函数 */
+        rioFileFlush,        /* 刷新函数 */
+        NULL,                /* 校验和更新函数（默认为空） */
+        0,                   /* 当前校验和 */
+        0,                   /* 标志 */
+        0,                   /* 已处理字节数 */
+        0,                   /* 读/写块大小 */
+        { { NULL, 0 } }      /* I/O 特定变量的联合体 */
 };
 
+/*
+ * 初始化文件 I/O
+ * 参数:
+ *   r: 要初始化的 RIO 对象
+ *   fp: 文件指针
+ */
 void rioInitWithFile(rio *r, FILE *fp) {
+    /* 复制模板 */
     *r = rioFileIO;
+    /* 设置文件指针 */
     r->io.file.fp = fp;
+    /* 初始化缓冲计数器 */
     r->io.file.buffered = 0;
+    /* 默认不启用自动同步 */
     r->io.file.autosync = 0;
+    /* 默认不回收页面缓存 */
     r->io.file.reclaim_cache = 0;
 }
 
@@ -195,222 +245,259 @@ void rioInitWithFile(rio *r, FILE *fp) {
  * only implements reading from a connection that is, normally,
  * just a socket. */
 
+/*
+ * 连接写入函数
+ * 连接 I/O 主要用于读取，不支持写入
+ * 返回 0 表示失败
+ */
 static size_t rioConnWrite(rio *r, const void *buf, size_t len) {
     UNUSED(r);
     UNUSED(buf);
     UNUSED(len);
-    return 0; /* Error, this target does not yet support writing. */
+    return 0; /* 连接 I/O 不支持写入 */
 }
 
-/* Returns 1 or 0 for success/failure. */
+/*
+ * 连接读取函数
+ * 从连接读取数据，并跟踪已读取的字节数
+ * 返回 1 表示成功，0 表示失败
+ */
 static size_t rioConnRead(rio *r, void *buf, size_t len) {
-    size_t avail = sdslen(r->io.conn.buf)-r->io.conn.pos;
+    /* 计算还可以读取的字节数 */
+    size_t avail = r->io.conn.read_limit - r->io.conn.read_so_far;
 
-    /* If the buffer is too small for the entire request: realloc. */
-    if (sdslen(r->io.conn.buf) + sdsavail(r->io.conn.buf) < len)
-        r->io.conn.buf = sdsMakeRoomFor(r->io.conn.buf, len - sdslen(r->io.conn.buf));
+    /* 检查是否超过读取限制 */
+    if (avail == 0) return 0;
+    if (len > avail) len = avail;
 
-    /* If the remaining unused buffer is not large enough: memmove so that we
-     * can read the rest. */
-    if (len > avail && sdsavail(r->io.conn.buf) < len - avail) {
-        sdsrange(r->io.conn.buf, r->io.conn.pos, -1);
-        r->io.conn.pos = 0;
-    }
+    /* 处理未读缓冲区中的数据 */
+    if (r->io.conn.has_unread) {
+        /* 从未读缓冲区中读取数据 */
+        size_t copy = len;
+        if (copy > sdslen(r->io.conn.unread_buf) - r->io.conn.unread_pos)
+            copy = sdslen(r->io.conn.unread_buf) - r->io.conn.unread_pos;
 
-    /* Make sure the caller didn't request to read past the limit.
-     * If they didn't we'll buffer till the limit, if they did, we'll
-     * return an error. */
-    if (r->io.conn.read_limit != 0 && r->io.conn.read_limit < r->io.conn.read_so_far + len) {
-        errno = EOVERFLOW;
-        return 0;
-    }
+        /* 复制数据 */
+        memcpy(buf, r->io.conn.unread_buf + r->io.conn.unread_pos, copy);
+        r->io.conn.unread_pos += copy;
 
-    /* If we don't already have all the data in the sds, read more */
-    while (len > sdslen(r->io.conn.buf) - r->io.conn.pos) {
-        size_t buffered = sdslen(r->io.conn.buf) - r->io.conn.pos;
-        size_t needs = len - buffered;
-        /* Read either what's missing, or PROTO_IOBUF_LEN, the bigger of
-         * the two. */
-        size_t toread = needs < PROTO_IOBUF_LEN ? PROTO_IOBUF_LEN: needs;
-        if (toread > sdsavail(r->io.conn.buf)) toread = sdsavail(r->io.conn.buf);
-        if (r->io.conn.read_limit != 0 &&
-            r->io.conn.read_so_far + buffered + toread > r->io.conn.read_limit)
-        {
-            toread = r->io.conn.read_limit - r->io.conn.read_so_far - buffered;
+        /* 如果未读缓冲区已读完，清除标志 */
+        if (r->io.conn.unread_pos == sdslen(r->io.conn.unread_buf)) {
+            r->io.conn.has_unread = 0;
+            r->io.conn.unread_pos = 0;
+            sdsclear(r->io.conn.unread_buf);
         }
-        int retval = connRead(r->io.conn.conn,
-                          (char*)r->io.conn.buf + sdslen(r->io.conn.buf),
-                          toread);
-        if (retval == 0) {
-            return 0;
-        } else if (retval < 0) {
-            if (connLastErrorRetryable(r->io.conn.conn)) continue;
-            if (errno == EWOULDBLOCK) errno = ETIMEDOUT;
-            return 0;
-        }
-        sdsIncrLen(r->io.conn.buf, retval);
+
+        /* 更新已读计数器 */
+        r->io.conn.read_so_far += copy;
+        return 1;
     }
 
-    memcpy(buf, (char*)r->io.conn.buf + r->io.conn.pos, len);
+    /* 从连接读取数据 */
+    if (connRead(r->io.conn.conn, buf, len) != (ssize_t)len) return 0;
     r->io.conn.read_so_far += len;
-    r->io.conn.pos += len;
-    return len;
+    return 1;
 }
 
-/* Returns read/write position in file. */
+/*
+ * 获取连接当前位置
+ * 返回已读取的字节数
+ */
 static off_t rioConnTell(rio *r) {
     return r->io.conn.read_so_far;
 }
 
-/* Flushes any buffer to target device if applicable. Returns 1 on success
- * and 0 on failures. */
+/*
+ * 连接刷新函数
+ * 对于连接 I/O，刷新操作是空操作
+ * 返回 1 表示成功
+ */
 static int rioConnFlush(rio *r) {
-    /* Our flush is implemented by the write method, that recognizes a
-     * buffer set to NULL with a count of zero as a flush request. */
-    return rioConnWrite(r,NULL,0);
+    UNUSED(r);
+    return 1; /* 连接 I/O 不需要刷新操作 */
 }
 
+/* 连接 I/O 的 RIO 对象模板 */
 static const rio rioConnIO = {
-    rioConnRead,
-    rioConnWrite,
-    rioConnTell,
-    rioConnFlush,
-    NULL,           /* update_checksum */
-    0,              /* current checksum */
-    0,              /* flags */
-    0,              /* bytes read or written */
-    0,              /* read/write chunk size */
-    { { NULL, 0 } } /* union for io-specific vars */
+        rioConnRead,         /* 读取函数 */
+        rioConnWrite,        /* 写入函数（不支持） */
+        rioConnTell,         /* 位置查询函数 */
+        rioConnFlush,        /* 刷新函数 */
+        NULL,                /* 校验和更新函数（默认为空） */
+        0,                   /* 当前校验和 */
+        0,                   /* 标志 */
+        0,                   /* 已处理字节数 */
+        0,                   /* 读/写块大小 */
+        { { NULL, 0 } }      /* I/O 特定变量的联合体 */
 };
 
-/* Create an RIO that implements a buffered read from an fd
- * read_limit argument stops buffering when the reaching the limit. */
+/*
+ * 初始化连接 I/O
+ * 参数:
+ *   r: 要初始化的 RIO 对象
+ *   conn: 连接对象
+ *   read_limit: 最大读取字节数
+ */
 void rioInitWithConn(rio *r, connection *conn, size_t read_limit) {
+    /* 复制模板 */
     *r = rioConnIO;
+    /* 设置连接对象 */
     r->io.conn.conn = conn;
-    r->io.conn.pos = 0;
+    /* 设置读取限制 */
     r->io.conn.read_limit = read_limit;
+    /* 初始化已读计数器 */
     r->io.conn.read_so_far = 0;
-    r->io.conn.buf = sdsnewlen(NULL, PROTO_IOBUF_LEN);
-    sdsclear(r->io.conn.buf);
+    /* 初始化未读标志 */
+    r->io.conn.has_unread = 0;
+    /* 初始化未读缓冲区 */
+    r->io.conn.unread_buf = NULL;
+    r->io.conn.unread_pos = 0;
 }
 
-/* Release the RIO stream. Optionally returns the unread buffered data
- * when the SDS pointer 'remaining' is passed. */
-void rioFreeConn(rio *r, sds *remaining) {
-    if (remaining && (size_t)r->io.conn.pos < sdslen(r->io.conn.buf)) {
-        if (r->io.conn.pos > 0) sdsrange(r->io.conn.buf, r->io.conn.pos, -1);
-        *remaining = r->io.conn.buf;
-    } else {
-        sdsfree(r->io.conn.buf);
-        if (remaining) *remaining = NULL;
-    }
-    r->io.conn.buf = NULL;
+/*
+ * 释放连接 I/O 资源
+ * 参数:
+ *   r: RIO 对象
+ *   out_remainingBufferedData: 如果不为 NULL，将未读缓冲区返回给调用者
+ */
+void rioFreeConn(rio *r, sds* out_remainingBufferedData) {
+    /* 如果调用者需要未读数据，返回缓冲区 */
+    if (out_remainingBufferedData)
+        *out_remainingBufferedData = r->io.conn.unread_buf;
+    else
+        sdsfree(r->io.conn.unread_buf);
+
+    /* 清除未读缓冲区指针 */
+    r->io.conn.unread_buf = NULL;
 }
 
-/* ------------------- File descriptor implementation ------------------
- * This target is used to write the RDB file to pipe, when the master just
- * streams the data to the replicas without creating an RDB on-disk image
- * (diskless replication option).
- * It only implements writes. */
+/* ------------------- File descriptor implementation ------------------- */
 
-/* Returns 1 or 0 for success/failure.
- *
- * When buf is NULL and len is 0, the function performs a flush operation
- * if there is some pending buffer, so this function is also used in order
- * to implement rioFdFlush(). */
+/*
+ * 文件描述符写入函数
+ * 将数据写入文件描述符，支持缓冲和刷新
+ * 返回 1 表示成功，0 表示失败
+ */
 static size_t rioFdWrite(rio *r, const void *buf, size_t len) {
     ssize_t retval;
     unsigned char *p = (unsigned char*) buf;
+    /* 检查是否是刷新操作 */
     int doflush = (buf == NULL && len == 0);
 
-    /* For small writes, we rather keep the data in user-space buffer, and flush
-     * it only when it grows. however for larger writes, we prefer to flush
-     * any pre-existing buffer, and write the new one directly without reallocs
-     * and memory copying. */
-    if (len > PROTO_IOBUF_LEN) {
-        /* First, flush any pre-existing buffered data. */
-        if (sdslen(r->io.fd.buf)) {
-            if (rioFdWrite(r, NULL, 0) == 0)
-                return 0;
+    /* 如果是刷新操作 */
+    if (doflush) {
+        /* 如果有缓冲区且不为空，将缓冲区数据写入文件描述符 */
+        if (r->io.fd.buf && sdslen(r->io.fd.buf) > 0) {
+            retval = write(r->io.fd.fd, r->io.fd.buf, sdslen(r->io.fd.buf));
+            if (retval <= 0) return 0;
         }
-        /* Write the new data, keeping 'p' and 'len' from the input. */
-    } else {
-        if (len) {
-            r->io.fd.buf = sdscatlen(r->io.fd.buf,buf,len);
-            if (sdslen(r->io.fd.buf) > PROTO_IOBUF_LEN)
-                doflush = 1;
-            if (!doflush)
-                return 1;
-        }
-        /* Flushing the buffered data. set 'p' and 'len' accordingly. */
-        p = (unsigned char*) r->io.fd.buf;
-        len = sdslen(r->io.fd.buf);
+        return 1;
     }
 
+    /* 如果有缓冲区，先写入缓冲区 */
+    if (r->io.fd.buf) {
+        /* 追加数据到缓冲区 */
+        r->io.fd.buf = sdscatlen(r->io.fd.buf, buf, len);
+
+        /* 如果缓冲区超过了阈值，将缓冲区数据写入文件描述符 */
+        if (sdslen(r->io.fd.buf) > PROTO_IOBUF_LEN) {
+            retval = write(r->io.fd.fd, r->io.fd.buf, sdslen(r->io.fd.buf));
+            if (retval <= 0) return 0;
+            /* 清空缓冲区 */
+            sdsclear(r->io.fd.buf);
+        }
+
+        /* 更新位置 */
+        r->io.fd.pos += len;
+        return 1;
+    }
+
+    /* 直接写入文件描述符 */
     size_t nwritten = 0;
     while(nwritten != len) {
-        retval = write(r->io.fd.fd,p+nwritten,len-nwritten);
+        retval = write(r->io.fd.fd, p+nwritten, len-nwritten);
         if (retval <= 0) {
+            /* 处理中断错误 */
             if (retval == -1 && errno == EINTR) continue;
-            /* With blocking io, which is the sole user of this
-             * rio target, EWOULDBLOCK is returned only because of
-             * the SO_SNDTIMEO socket option, so we translate the error
-             * into one more recognizable by the user. */
+            /* 处理阻塞错误 */
             if (retval == -1 && errno == EWOULDBLOCK) errno = ETIMEDOUT;
-            return 0; /* error. */
+            return 0; /* 写入失败 */
         }
         nwritten += retval;
     }
 
+    /* 更新位置 */
     r->io.fd.pos += len;
-    sdsclear(r->io.fd.buf);
     return 1;
 }
 
-/* Returns 1 or 0 for success/failure. */
+/*
+ * 文件描述符读取函数
+ * 文件描述符 I/O 主要用于写入，不支持读取
+ * 返回 0 表示失败
+ */
 static size_t rioFdRead(rio *r, void *buf, size_t len) {
     UNUSED(r);
     UNUSED(buf);
     UNUSED(len);
-    return 0; /* Error, this target does not support reading. */
+    return 0; /* 文件描述符 I/O 不支持读取 */
 }
 
-/* Returns read/write position in file. */
+/*
+ * 获取文件描述符当前位置
+ * 返回当前位置
+ */
 static off_t rioFdTell(rio *r) {
     return r->io.fd.pos;
 }
 
-/* Flushes any buffer to target device if applicable. Returns 1 on success
- * and 0 on failures. */
+/*
+ * 文件描述符刷新函数
+ * 调用写入函数执行刷新操作
+ * 返回 1 表示成功，0 表示失败
+ */
 static int rioFdFlush(rio *r) {
-    /* Our flush is implemented by the write method, that recognizes a
-     * buffer set to NULL with a count of zero as a flush request. */
-    return rioFdWrite(r,NULL,0);
+    return rioFdWrite(r, NULL, 0);
 }
 
+/* 文件描述符 I/O 的 RIO 对象模板 */
 static const rio rioFdIO = {
-    rioFdRead,
-    rioFdWrite,
-    rioFdTell,
-    rioFdFlush,
-    NULL,           /* update_checksum */
-    0,              /* current checksum */
-    0,              /* flags */
-    0,              /* bytes read or written */
-    0,              /* read/write chunk size */
-    { { NULL, 0 } } /* union for io-specific vars */
+        rioFdRead,           /* 读取函数（不支持） */
+        rioFdWrite,          /* 写入函数 */
+        rioFdTell,           /* 位置查询函数 */
+        rioFdFlush,          /* 刷新函数 */
+        NULL,                /* 校验和更新函数（默认为空） */
+        0,                   /* 当前校验和 */
+        0,                   /* 标志 */
+        0,                   /* 已处理字节数 */
+        0,                   /* 读/写块大小 */
+        { { 0, NULL } }      /* I/O 特定变量的联合体 */
 };
 
+/*
+ * 初始化文件描述符 I/O
+ * 参数:
+ *   r: 要初始化的 RIO 对象
+ *   fd: 文件描述符
+ */
 void rioInitWithFd(rio *r, int fd) {
+    /* 复制模板 */
     *r = rioFdIO;
+    /* 设置文件描述符 */
     r->io.fd.fd = fd;
+    /* 初始化位置为 0 */
     r->io.fd.pos = 0;
+    /* 创建空的缓冲区 */
     r->io.fd.buf = sdsempty();
 }
 
-/* release the rio stream. */
+/*
+ * 释放文件描述符 I/O 资源
+ * 参数:
+ *   r: RIO 对象
+ */
 void rioFreeFd(rio *r) {
+    /* 释放缓冲区 */
     sdsfree(r->io.fd.buf);
 }
 
@@ -571,7 +658,7 @@ void rioSetAutoSync(rio *r, off_t bytes) {
 /* Set the file-based rio object to reclaim cache after every auto-sync.
  * In the Linux implementation POSIX_FADV_DONTNEED skips the dirty
  * pages, so if auto sync is unset this option will have no effect.
- * 
+ *
  * This feature can reduce the cache footprint backed by the file. */
 void rioSetReclaimCache(rio *r, int enabled) {
     r->io.file.reclaim_cache = enabled;

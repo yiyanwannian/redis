@@ -1,0 +1,31 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+
+title 主从模式节点交互流程
+
+actor "客户端\nClient" as Client
+participant "Redis主节点\nMaster" as Master #LightBlue
+participant "Redis从节点\nReplica" as Slave #LightGreen
+
+== 复制初始化 ==
+Slave -> Master: REPLICAOF <masterip> <port>
+Master --> Slave: 确认连接
+
+Slave -> Master: PSYNC ? -1
+Master -> Master: BGSAVE生成RDB文件
+Master --> Slave: 发送RDB文件
+Slave -> Slave: 加载RDB数据
+
+== 命令传播 ==
+Client -> Master: SET key value
+Master -> Master: 执行命令
+Master --> Client: OK
+Master --> Slave: 传播写命令
+Slave -> Slave: 执行相同命令
+
+== 心跳检测 ==
+Slave -> Master: REPLCONF ACK <offset>
+Master -> Master: 更新从节点复制偏移量
+
+@enduml

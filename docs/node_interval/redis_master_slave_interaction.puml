@@ -1,0 +1,66 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+autonumber
+
+title Redis主从模式交互时序图
+
+participant "客户端\nClient" as Client
+participant "Redis主节点\nMaster" as Master #LightBlue
+participant "Redis从节点1\nReplica 1" as Slave1 #LightGreen
+participant "Redis从节点2\nReplica 2" as Slave2 #LightGreen
+
+== 初始化复制 ==
+Slave1 -> Master: REPLICAOF <masterip> <port>
+Master --> Slave1: 确认连接
+Slave1 -> Master: PSYNC ? -1
+Master -> Master: BGSAVE生成RDB文件
+Master --> Slave1: 发送RDB文件
+Slave1 -> Slave1: 加载RDB数据
+
+Slave2 -> Master: REPLICAOF <masterip> <port>
+Master --> Slave2: 确认连接
+Slave2 -> Master: PSYNC ? -1
+Master -> Master: BGSAVE生成RDB文件
+Master --> Slave2: 发送RDB文件
+Slave2 -> Slave2: 加载RDB数据
+
+== 读写操作 ==
+Client -> Master: SET key1 value1 (写操作)
+Master -> Master: 执行命令
+Master --> Client: OK
+Master --> Slave1: 传播写命令
+Master --> Slave2: 传播写命令
+Slave1 -> Slave1: 执行相同命令
+Slave2 -> Slave2: 执行相同命令
+
+Client -> Slave1: GET key1 (读操作)
+Slave1 --> Client: "value1"
+
+Client -> Slave2: GET key1 (读操作)
+Slave2 --> Client: "value1"
+
+== 心跳检测 ==
+Slave1 -> Master: REPLCONF ACK <offset>
+Master --> Slave1: OK
+
+Slave2 -> Master: REPLCONF ACK <offset>
+Master --> Slave2: OK
+
+== 网络中断和部分重同步 ==
+note over Master, Slave1: 网络短暂断开
+Client -> Master: SET key2 value2
+Master -> Master: 执行命令并记录到复制缓冲区
+Master --> Client: OK
+Master --> Slave2: 传播写命令
+Slave2 -> Slave2: 执行相同命令
+
+note over Master, Slave1: 网络恢复
+Slave1 -> Master: PSYNC <runid> <offset>
+Master -> Master: 检查复制偏移量
+Master --> Slave1: +CONTINUE <offset>
+Master --> Slave1: 发送断开期间的命令
+Slave1 -> Slave1: 执行命令追赶主节点
+
+@enduml

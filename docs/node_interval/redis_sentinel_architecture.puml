@@ -1,0 +1,48 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+
+title Redis Sentinel模式架构
+
+actor "客户端\nClient" as Client
+database "Redis主节点\nMaster" as Master #LightBlue
+database "Redis从节点1\nReplica 1" as Slave1 #LightGreen
+database "Redis从节点2\nReplica 2" as Slave2 #LightGreen
+control "Sentinel节点1" as Sentinel1 #LightPink
+control "Sentinel节点2" as Sentinel2 #LightPink
+control "Sentinel节点3" as Sentinel3 #LightPink
+
+Client -down-> Sentinel1 : 查询主节点
+Client -down-> Sentinel2 : 查询主节点
+Client -down-> Sentinel3 : 查询主节点
+Client -down-> Master : 读/写请求
+Client -down-> Slave1 : 读请求
+Client -down-> Slave2 : 读请求
+
+Master -right-> Slave1 : 数据同步
+Master -right-> Slave2 : 数据同步
+
+Sentinel1 -down-> Master : 监控
+Sentinel1 -down-> Slave1 : 监控
+Sentinel1 -down-> Slave2 : 监控
+
+Sentinel2 -down-> Master : 监控
+Sentinel2 -down-> Slave1 : 监控
+Sentinel2 -down-> Slave2 : 监控
+
+Sentinel3 -down-> Master : 监控
+Sentinel3 -down-> Slave1 : 监控
+Sentinel3 -down-> Slave2 : 监控
+
+Sentinel1 <-right-> Sentinel2 : 通信
+Sentinel2 <-right-> Sentinel3 : 通信
+Sentinel3 <-right-> Sentinel1 : 通信
+
+note right of Sentinel1
+  监控Redis节点
+  检测节点故障
+  执行故障转移
+  通知客户端
+end note
+
+@enduml

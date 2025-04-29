@@ -1,0 +1,41 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+
+title Redis集群模式启动流程
+
+start
+:准备多个Redis节点;
+:配置每个节点启用集群模式;
+:启动所有Redis节点;
+
+:使用redis-cli创建集群;
+note right
+  redis-cli --cluster create 
+  127.0.0.1:7000 127.0.0.1:7001 127.0.0.1:7002
+  127.0.0.1:7003 127.0.0.1:7004 127.0.0.1:7005
+  --cluster-replicas 1
+end note
+
+:分配哈希槽;
+note right
+  16384个哈希槽
+  平均分配给主节点
+end note
+
+:建立主从关系;
+note right
+  每个主节点分配
+  指定数量的从节点
+end note
+
+:节点间握手;
+note right
+  交换集群状态信息
+  建立集群总线连接
+end note
+
+:集群完成初始化;
+stop
+
+@enduml

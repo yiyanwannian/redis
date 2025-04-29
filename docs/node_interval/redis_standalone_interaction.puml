@@ -1,0 +1,64 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+autonumber
+
+title Redis单机模式交互时序图
+
+participant "客户端A\nClient A" as ClientA
+participant "客户端B\nClient B" as ClientB
+participant "Redis实例\n(单机)" as Redis
+
+== 连接建立 ==
+ClientA -> Redis: 建立TCP连接
+Redis --> ClientA: 连接确认
+
+ClientB -> Redis: 建立TCP连接
+Redis --> ClientB: 连接确认
+
+== 数据操作 ==
+ClientA -> Redis: SET key1 value1
+Redis -> Redis: 在内存中设置键值对
+Redis --> ClientA: OK
+
+ClientB -> Redis: GET key1
+Redis -> Redis: 从内存中读取键值
+Redis --> ClientB: "value1"
+
+ClientA -> Redis: INCR counter
+Redis -> Redis: 原子递增操作
+Redis --> ClientA: 1
+
+ClientB -> Redis: INCR counter
+Redis -> Redis: 原子递增操作
+Redis --> ClientB: 2
+
+== 事务操作 ==
+ClientA -> Redis: MULTI
+Redis --> ClientA: OK
+ClientA -> Redis: SET key2 value2
+Redis --> ClientA: QUEUED
+ClientA -> Redis: SET key3 value3
+Redis --> ClientA: QUEUED
+ClientA -> Redis: EXEC
+Redis -> Redis: 原子执行事务中的命令
+Redis --> ClientA: [OK, OK]
+
+== 过期和内存管理 ==
+ClientA -> Redis: SET key4 value4 EX 10
+Redis -> Redis: 设置键值对并设置10秒过期时间
+Redis --> ClientA: OK
+
+note over Redis: 10秒后
+Redis -> Redis: 惰性删除或\n定期删除过期键
+
+note over Redis: 内存达到maxmemory
+Redis -> Redis: 根据淘汰策略\n删除部分键值对
+
+== 连接关闭 ==
+ClientA -> Redis: QUIT
+Redis --> ClientA: OK
+ClientA -> Redis: 关闭TCP连接
+
+@enduml

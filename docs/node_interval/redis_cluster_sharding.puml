@@ -1,0 +1,32 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+autonumber
+
+title Redis集群数据分片原理
+
+actor "客户端\nClient" as Client
+participant "Redis集群节点" as Node
+database "哈希槽0-5460" as Slot1 #LightBlue
+database "哈希槽5461-10922" as Slot2 #LightYellow
+database "哈希槽10923-16383" as Slot3 #LightGreen
+
+Client -> Node: SET key1 value1
+Node -> Node: CRC16(key1) % 16384 = 槽X
+alt #LightBlue 槽X在当前节点
+  Node -> Node: 在本地执行命令
+  Node --> Client: OK
+else 槽X不在当前节点
+  Node --> Client: MOVED 槽X 目标节点地址
+  Client -> Node: 重定向到正确节点
+  Node -> Node: 在本地执行命令
+  Node --> Client: OK
+end
+
+note right of Node
+  使用CRC16算法计算键的哈希值
+  对16384取模得到槽位
+  根据槽位确定负责的节点
+end note
+
+@enduml

@@ -1,0 +1,48 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+
+title Redis集群模式架构
+
+actor "客户端\nClient" as Client
+
+package "Redis集群" {
+  node "节点1\n主节点\n(槽0-5460)" as Node1 #LightBlue
+  node "节点2\n主节点\n(槽5461-10922)" as Node2 #LightBlue
+  node "节点3\n主节点\n(槽10923-16383)" as Node3 #LightBlue
+  
+  node "节点4\n从节点\n(复制节点1)" as Node4 #LightGreen
+  node "节点5\n从节点\n(复制节点2)" as Node5 #LightGreen
+  node "节点6\n从节点\n(复制节点3)" as Node6 #LightGreen
+}
+
+Client --> Node1 : 读/写请求
+Client --> Node2 : 读/写请求
+Client --> Node3 : 读/写请求
+Client --> Node4 : 读请求
+Client --> Node5 : 读请求
+Client --> Node6 : 读请求
+
+Node1 <--> Node2 : 集群总线通信
+Node2 <--> Node3 : 集群总线通信
+Node3 <--> Node1 : 集群总线通信
+Node1 <--> Node3 : 集群总线通信
+Node1 <--> Node4 : 数据同步
+Node2 <--> Node5 : 数据同步
+Node3 <--> Node6 : 数据同步
+
+Node4 <--> Node5 : 集群总线通信
+Node5 <--> Node6 : 集群总线通信
+Node6 <--> Node4 : 集群总线通信
+
+note right of Node1
+  每个主节点负责一部分哈希槽
+  (总共16384个槽)
+end note
+
+note right of Node4
+  每个主节点至少有一个从节点
+  提供高可用性
+end note
+
+@enduml
