@@ -1,0 +1,168 @@
+@startuml HGET命令执行流程
+
+skinparam backgroundColor white
+skinparam handwritten false
+skinparam defaultFontName "Microsoft YaHei"
+skinparam defaultFontSize 14
+skinparam sequenceArrowThickness 2
+skinparam roundCorner 10
+skinparam dpi 100
+skinparam arrowColor #2C3E50
+skinparam noteBackgroundColor #FEFECE
+skinparam noteBorderColor #A80036
+
+title HGET命令执行流程
+
+actor "客户端" as Client
+participant "hgetCommand()" as HgetCommand
+participant "lookupKeyReadOrReply()" as LookupKeyReadOrReply
+participant "lookupKeyRead()" as LookupKeyRead
+participant "lookupKeyReadWithFlags()" as LookupKeyReadWithFlags
+participant "lookupKey()" as LookupKey
+participant "dbFindWithKeySlot()" as DbFindWithKeySlot
+participant "dbFindGenericWithKeySlot()" as DbFindGenericWithKeySlot
+participant "kvstoreDictFind()" as KvstoreDictFind
+participant "kvstoreGetDict()" as KvstoreGetDict
+participant "dictFind()" as DictFind
+participant "addHashFieldToReply()" as AddHashFieldToReply
+participant "hashTypeGetValue()" as HashTypeGetValue
+participant "hashTypeGetFromHashTable()" as HashTypeGetFromHashTable
+participant "hashTypeGetFromListpack()" as HashTypeGetFromListpack
+
+Client -> HgetCommand: 发送HGET命令
+activate HgetCommand
+
+HgetCommand -> LookupKeyReadOrReply: 查找键(c->argv[1])
+activate LookupKeyReadOrReply
+
+LookupKeyReadOrReply -> LookupKeyRead: 查找键
+activate LookupKeyRead
+
+LookupKeyRead -> LookupKeyReadWithFlags: 使用LOOKUP_NONE标志
+activate LookupKeyReadWithFlags
+
+LookupKeyReadWithFlags -> LookupKey: 查找键
+activate LookupKey
+
+note right of LookupKey
+  计算键的哈希槽
+  key_slot = getKeySlot(key->ptr)
+end note
+
+LookupKey -> DbFindWithKeySlot: 在数据库中查找键(key->ptr, key_slot)
+activate DbFindWithKeySlot
+
+DbFindWithKeySlot -> DbFindGenericWithKeySlot: 在kvstore中查找键
+activate DbFindGenericWithKeySlot
+
+DbFindGenericWithKeySlot -> KvstoreDictFind: 在kvstore中查找键(keySlot, key)
+activate KvstoreDictFind
+
+KvstoreDictFind -> KvstoreGetDict: 获取字典(didx)
+activate KvstoreGetDict
+
+KvstoreGetDict --> KvstoreDictFind: 返回字典对象
+deactivate KvstoreGetDict
+
+KvstoreDictFind -> DictFind: 在字典中查找键(d, key)
+activate DictFind
+
+note right of DictFind
+  1. 计算键的哈希值
+  2. 在哈希表中查找键
+  3. 返回dictEntry或NULL
+end note
+
+DictFind --> KvstoreDictFind: 返回dictEntry
+deactivate DictFind
+
+KvstoreDictFind --> DbFindGenericWithKeySlot: 返回dictEntry
+deactivate KvstoreDictFind
+
+DbFindGenericWithKeySlot --> DbFindWithKeySlot: 返回dictEntry
+deactivate DbFindGenericWithKeySlot
+
+DbFindWithKeySlot --> LookupKey: 返回dictEntry
+deactivate DbFindWithKeySlot
+
+note right of LookupKey
+  1. 检查键是否过期
+  2. 更新访问时间(LRU/LFU)
+  3. 更新命中/未命中统计
+end note
+
+LookupKey --> LookupKeyReadWithFlags: 返回值对象或NULL
+deactivate LookupKey
+
+LookupKeyReadWithFlags --> LookupKeyRead: 返回值对象或NULL
+deactivate LookupKeyReadWithFlags
+
+LookupKeyRead --> LookupKeyReadOrReply: 返回值对象或NULL
+deactivate LookupKeyRead
+
+alt 键不存在
+    LookupKeyReadOrReply -> Client: 返回NULL
+else 键存在
+    LookupKeyReadOrReply --> HgetCommand: 返回哈希对象
+end
+deactivate LookupKeyReadOrReply
+
+alt 键不存在或类型不是哈希
+    HgetCommand -> Client: 返回错误或NULL
+else 键存在且类型是哈希
+    HgetCommand -> AddHashFieldToReply: 获取哈希字段值(o, c->argv[2]->ptr)
+    activate AddHashFieldToReply
+    
+    AddHashFieldToReply -> HashTypeGetValue: 获取字段值
+    activate HashTypeGetValue
+    
+    alt 哈希使用listpack编码
+        HashTypeGetValue -> HashTypeGetFromListpack: 从listpack获取字段值
+        activate HashTypeGetFromListpack
+        
+        note right of HashTypeGetFromListpack
+          1. 在listpack中查找字段
+          2. 获取字段对应的值
+          3. 检查字段是否过期
+        end note
+        
+        HashTypeGetFromListpack --> HashTypeGetValue: 返回结果
+        deactivate HashTypeGetFromListpack
+    else 哈希使用哈希表编码
+        HashTypeGetValue -> HashTypeGetFromHashTable: 从哈希表获取字段值
+        activate HashTypeGetFromHashTable
+        
+        note right of HashTypeGetFromHashTable
+          1. 在哈希表中查找字段
+          2. 获取字段对应的值
+          3. 检查字段是否过期
+        end note
+        
+        HashTypeGetFromHashTable --> HashTypeGetValue: 返回结果
+        deactivate HashTypeGetFromHashTable
+    end
+    
+    alt 字段过期
+        HashTypeGetValue -> HashTypeGetValue: 处理过期字段
+        note right
+          1. 如果是主节点，删除过期字段
+          2. 如果是从节点，返回过期标记
+        end note
+    end
+    
+    HashTypeGetValue --> AddHashFieldToReply: 返回字段值或过期标记
+    deactivate HashTypeGetValue
+    
+    alt 字段存在且未过期
+        AddHashFieldToReply -> Client: 返回字段值
+    else 字段不存在或已过期
+        AddHashFieldToReply -> Client: 返回NULL
+    end
+    
+    deactivate AddHashFieldToReply
+end
+
+HgetCommand --> Client: 完成命令处理
+deactivate HgetCommand
+
+@enduml
