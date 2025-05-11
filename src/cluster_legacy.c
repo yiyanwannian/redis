@@ -1061,6 +1061,15 @@ void clusterInitLast(void) {
  * 5) Only for hard reset: currentEpoch and configEpoch are set to 0.
  * 6) The new configuration is saved and the cluster state updated.
  * 7) If the node was a slave, the whole data set is flushed away. */
+/* 重置节点，执行软重置或硬重置：
+*
+* 1) 忘记所有其他节点。
+* 2) 释放所有分配的/打开的槽位。
+* 3) 如果节点是从节点，则将其转换为主节点。
+* 4) 仅在硬重置时：生成新的节点 ID。
+* 5) 仅在硬重置时：将 currentEpoch 和 configEpoch 设置为 0。
+* 6) 保存新配置并更新集群状态。
+* 7) 如果节点是从节点，则清空整个数据集。 */
 void clusterReset(int hard) {
     dictIterator *di;
     dictEntry *de;

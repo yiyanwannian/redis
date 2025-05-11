@@ -294,87 +294,88 @@ static_assert(offsetof(clusterMsg, data) == 2256, "unexpected field offset");
 #define CLUSTERMSG_FLAG0_EXT_DATA (1<<2) /* Message contains extension data */
 
 struct _clusterNode {
-    mstime_t ctime; /* Node object creation time. */
-    char name[CLUSTER_NAMELEN]; /* Node name, hex string, sha1-size */
-    char shard_id[CLUSTER_NAMELEN]; /* shard id, hex string, sha1-size */
-    int flags;      /* CLUSTER_NODE_... */
-    uint64_t configEpoch; /* Last configEpoch observed for this node */
-    unsigned char slots[CLUSTER_SLOTS/8]; /* slots handled by this node */
-    uint16_t *slot_info_pairs; /* Slots info represented as (start/end) pair (consecutive index). */
-    int slot_info_pairs_count; /* Used number of slots in slot_info_pairs */
-    int numslots;   /* Number of slots handled by this node */
-    int numslaves;  /* Number of slave nodes, if this is a master */
-    clusterNode **slaves; /* pointers to slave nodes */
+    mstime_t ctime; /* Node object creation time. */ /* 节点对象创建时间 */
+    char name[CLUSTER_NAMELEN]; /* Node name, hex string, sha1-size */ /* 节点名称，十六进制字符串，sha1大小 */
+    char shard_id[CLUSTER_NAMELEN]; /* shard id, hex string, sha1-size */ /* 分片ID，十六进制字符串，sha1大小 */
+    int flags; /* CLUSTER_NODE_... */ /* 节点标志 */
+    uint64_t configEpoch; /* Last configEpoch observed for this node */ /* 此节点观察到的最后配置纪元 */
+    unsigned char slots[CLUSTER_SLOTS/8]; /* slots handled by this node */ /* 此节点处理的槽位 */
+    uint16_t *slot_info_pairs; /* Slots info represented as (start/end) pair (consecutive index). */ /* 槽位信息表示为（起始/结束）对（连续索引） */
+    int slot_info_pairs_count; /* Used number of slots in slot_info_pairs */ /* slot_info_pairs 中使用的槽位数量 */
+    int numslots; /* Number of slots handled by this node */ /* 此节点处理的槽位数量 */
+    int numslaves; /* Number of slave nodes, if this is a master */ /* 如果是主节点，则为从节点的数量 */
+    clusterNode **slaves; /* pointers to slave nodes */ /* 指向从节点的指针 */
     clusterNode *slaveof; /* pointer to the master node. Note that it
-                             may be NULL even if the node is a slave
-                             if we don't have the master node in our
-                             tables. */
-    unsigned long long last_in_ping_gossip; /* The number of the last carried in the ping gossip section */
-    mstime_t ping_sent;      /* Unix time we sent latest ping */
-    mstime_t pong_received;  /* Unix time we received the pong */
-    mstime_t data_received;  /* Unix time we received any data */
-    mstime_t fail_time;      /* Unix time when FAIL flag was set */
-    mstime_t voted_time;     /* Last time we voted for a slave of this master */
-    mstime_t repl_offset_time;  /* Unix time we received offset for this node */
-    mstime_t orphaned_time;     /* Starting time of orphaned master condition */
-    long long repl_offset;      /* Last known repl offset for this node. */
-    char ip[NET_IP_STR_LEN];    /* Latest known IP address of this node */
-    sds hostname;               /* The known hostname for this node */
-    sds human_nodename;         /* The known human readable nodename for this node */
-    int tcp_port;               /* Latest known clients TCP port. */
-    int tls_port;               /* Latest known clients TLS port */
-    int cport;                  /* Latest known cluster port of this node. */
-    clusterLink *link;          /* TCP/IP link established toward this node */
-    clusterLink *inbound_link;  /* TCP/IP link accepted from this node */
-    list *fail_reports;         /* List of nodes signaling this as failing */
+                         may be NULL even if the node is a slave
+                         if we don't have the master node in our
+                         tables. */ /* 指向主节点的指针。注意，即使节点是从节点，如果我们在表中没有主节点，它也可能为 NULL */
+    unsigned long long last_in_ping_gossip; /* The number of the last carried in the ping gossip section */ /* ping gossip 部分中最后携带的编号 */
+    mstime_t ping_sent; /* Unix time we sent latest ping */ /* 发送最新 ping 的 Unix 时间 */
+    mstime_t pong_received; /* Unix time we received the pong */ /* 接收 pong 的 Unix 时间 */
+    mstime_t data_received; /* Unix time we received any data */ /* 接收任何数据的 Unix 时间 */
+    mstime_t fail_time; /* Unix time when FAIL flag was set */ /* 设置 FAIL 标志的 Unix 时间 */
+    mstime_t voted_time; /* Last time we voted for a slave of this master */ /* 上次为此主节点的从节点投票的时间 */
+    mstime_t repl_offset_time; /* Unix time we received offset for this node */ /* 接收此节点偏移量的 Unix 时间 */
+    mstime_t orphaned_time; /* Starting time of orphaned master condition */ /* 孤立主节点状态的开始时间 */
+    long long repl_offset; /* Last known repl offset for this node. */ /* 此节点的最后已知复制偏移量 */
+    char ip[NET_IP_STR_LEN]; /* Latest known IP address of this node */ /* 此节点的最新已知 IP 地址 */
+    sds hostname; /* The known hostname for this node */ /* 此节点的已知主机名 */
+    sds human_nodename; /* The known human readable nodename for this node */ /* 此节点的已知可读节点名称 */
+    int tcp_port; /* Latest known clients TCP port. */ /* 最新已知的客户端 TCP 端口 */
+    int tls_port; /* Latest known clients TLS port */ /* 最新已知的客户端 TLS 端口 */
+    int cport; /* Latest known cluster port of this node. */ /* 此节点的最新已知集群端口 */
+    clusterLink *link; /* TCP/IP link established toward this node */ /* 建立到此节点的 TCP/IP 链接 */
+    clusterLink *inbound_link; /* TCP/IP link accepted from this node */ /* 从此节点接受的 TCP/IP 链接 */
+    list *fail_reports; /* List of nodes signaling this as failing */ /* 标记此节点为失败的节点列表 */
 };
 
 struct clusterState {
-    clusterNode *myself;  /* This node */
-    uint64_t currentEpoch;
-    int state;            /* CLUSTER_OK, CLUSTER_FAIL, ... */
-    int size;             /* Num of master nodes with at least one slot */
-    dict *nodes;          /* Hash table of name -> clusterNode structures */
-    dict *shards;         /* Hash table of shard_id -> list (of nodes) structures */
-    dict *nodes_black_list; /* Nodes we don't re-add for a few seconds. */
-    clusterNode *migrating_slots_to[CLUSTER_SLOTS];
-    clusterNode *importing_slots_from[CLUSTER_SLOTS];
-    clusterNode *slots[CLUSTER_SLOTS];
-    char internal_secret[CLUSTER_INTERNALSECRETLEN];
-    /* The following fields are used to take the slave state on elections. */
-    mstime_t failover_auth_time; /* Time of previous or next election. */
-    int failover_auth_count;    /* Number of votes received so far. */
-    int failover_auth_sent;     /* True if we already asked for votes. */
-    int failover_auth_rank;     /* This slave rank for current auth request. */
-    uint64_t failover_auth_epoch; /* Epoch of the current election. */
+    clusterNode *myself;  /* This node */ /* 当前节点 */
+    uint64_t currentEpoch; /* Current epoch */ /* 当前纪元 */
+    int state;            /* CLUSTER_OK, CLUSTER_FAIL, ... */ /* 集群状态，例如 CLUSTER_OK 或 CLUSTER_FAIL */
+    int size;             /* Num of master nodes with at least one slot */ /* 至少有一个槽的主节点数量 */
+    dict *nodes;          /* Hash table of name -> clusterNode structures */ /* 名称到 clusterNode 结构的哈希表 */
+    dict *shards;         /* Hash table of shard_id -> list (of nodes) structures */ /* 分片 ID 到节点列表的哈希表 */
+    dict *nodes_black_list; /* Nodes we don't re-add for a few seconds. */ /* 短时间内不会重新添加的节点黑名单 */
+    clusterNode *migrating_slots_to[CLUSTER_SLOTS]; /* Migrating slots destination */ /* 正在迁移的槽的目标节点 */
+    clusterNode *importing_slots_from[CLUSTER_SLOTS]; /* Importing slots source */ /* 正在导入的槽的源节点 */
+    clusterNode *slots[CLUSTER_SLOTS]; /* Slots mapping */ /* 槽位映射 */
+    char internal_secret[CLUSTER_INTERNALSECRETLEN]; /* Internal secret */ /* 内部密钥 */
+    /* The following fields are used to take the slave state on elections. */ /* 以下字段用于选举时记录从节点状态 */
+    mstime_t failover_auth_time; /* Time of previous or next election. */ /* 上次或下一次选举的时间 */
+    int failover_auth_count;    /* Number of votes received so far. */ /* 到目前为止收到的选票数量 */
+    int failover_auth_sent;     /* True if we already asked for votes. */ /* 如果已经请求投票则为真 */
+    int failover_auth_rank;     /* This slave rank for current auth request. */ /* 当前授权请求中此从节点的排名 */
+    uint64_t failover_auth_epoch; /* Epoch of the current election. */ /* 当前选举的纪元 */
     int cant_failover_reason;   /* Why a slave is currently not able to
-                                   failover. See the CANT_FAILOVER_* macros. */
-    /* Manual failover state in common. */
+                                   failover. See the CANT_FAILOVER_* macros. */ /* 当前从节点无法进行故障转移的原因，参见 CANT_FAILOVER_* 宏 */
+    /* Manual failover state in common. */ /* 手动故障转移的通用状态 */
     mstime_t mf_end;            /* Manual failover time limit (ms unixtime).
-                                   It is zero if there is no MF in progress. */
-    /* Manual failover state of master. */
-    clusterNode *mf_slave;      /* Slave performing the manual failover. */
-    /* Manual failover state of slave. */
+                                   It is zero if there is no MF in progress. */  /* 手动故障转移的时间限制（毫秒 Unix 时间），如果没有正在进行的手动故障转移，则为零 */
+    /* Manual failover state of master. */ /* 主节点的手动故障转移状态 */
+    clusterNode *mf_slave;      /* Slave performing the manual failover. */ /* 执行手动故障转移的从节点 */
+    /* Manual failover state of slave. */ /* 从节点的手动故障转移状态 */
     long long mf_master_offset; /* Master offset the slave needs to start MF
-                                   or -1 if still not received. */
+                                   or -1 if still not received. */  /* 从节点开始手动故障转移所需的主节点偏移量，如果尚未接收到则为 -1 */
     int mf_can_start;           /* If non-zero signal that the manual failover
-                                   can start requesting masters vote. */
-    /* The following fields are used by masters to take state on elections. */
-    uint64_t lastVoteEpoch;     /* Epoch of the last vote granted. */
-    int todo_before_sleep; /* Things to do in clusterBeforeSleep(). */
-    /* Stats */
-    /* Messages received and sent by type. */
-    long long stats_bus_messages_sent[CLUSTERMSG_TYPE_COUNT];
-    long long stats_bus_messages_received[CLUSTERMSG_TYPE_COUNT];
+                                   can start requesting masters vote. */ /* 如果非零，则表示手动故障转移可以开始请求主节点投票 */
+    /* The following fields are used by masters to take state on elections. */ /* 以下字段由主节点在选举中使用 */
+    uint64_t lastVoteEpoch;     /* Epoch of the last vote granted. */ /* 上次投票授予的纪元 */
+    int todo_before_sleep; /* Things to do in clusterBeforeSleep(). */ /* 在 clusterBeforeSleep() 中需要完成的任务 */
+    /* Stats */ /* 统计信息 */
+    /* Messages received and sent by type. */ /* 按类型统计接收和发送的消息 */
+    long long stats_bus_messages_sent[CLUSTERMSG_TYPE_COUNT]; /* Messages sent */ /* 发送的消息数量 */
+    long long stats_bus_messages_received[CLUSTERMSG_TYPE_COUNT]; /* Messages received */ /* 接收的消息数量 */
     long long stats_pfail_nodes;    /* Number of nodes in PFAIL status,
-                                       excluding nodes without address. */
-    unsigned long long stat_cluster_links_buffer_limit_exceeded;  /* Total number of cluster links freed due to exceeding buffer limit */
+                                       excluding nodes without address. */  /* 处于 PFAIL 状态的节点数量，不包括没有地址的节点 */
+    unsigned long long stat_cluster_links_buffer_limit_exceeded;  /* Total number of cluster links freed due to exceeding buffer limit */   /* 因超出缓冲区限制而释放的集群链接总数 */
 
     /* Bit map for slots that are no longer claimed by the owner in cluster PING
      * messages. During slot migration, the owner will stop claiming the slot after
      * the ownership transfer. Set the bit corresponding to the slot when a node
      * stops claiming the slot. This prevents spreading incorrect information (that
-     * source still owns the slot) using UPDATE messages. */
+     * source still owns the slot) using UPDATE messages. */ /* 在集群 PING 消息中，槽位所有者不再声明的槽位位图。在槽位迁移期间，所有者在所有权转移后将停止声明槽位。
+        * 当节点停止声明槽位时，设置对应槽位的位。这可以防止通过 UPDATE 消息传播错误信息（即源节点仍然拥有槽位）。 */
     unsigned char owner_not_claiming_slot[CLUSTER_SLOTS / 8];
 };
 

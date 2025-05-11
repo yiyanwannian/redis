@@ -7259,7 +7259,6 @@ int main(int argc, char **argv) {
         return 0;
     }
 #endif
-#endif
 
     /* 我们需要初始化我们的库和服务器配置 */
 #ifdef INIT_SETPROCTITLE_REPLACEMENT

@@ -1,18 +1,7 @@
 @startuml Redis Sentinel消息交互
-
+!theme plain
 skinparam backgroundColor white
-skinparam handwritten false
-skinparam defaultFontName "Microsoft YaHei"
-skinparam defaultFontSize 14
-skinparam sequenceArrowThickness 2
-skinparam roundCorner 10
-skinparam dpi 100
-skinparam arrowColor #2C3E50
-skinparam noteBackgroundColor #FEFECE
-skinparam noteBorderColor #A80036
-
-autonumber
-
+skinparam groupInheritBack false
 title Redis Sentinel 消息交互过程
 
 ' 参与者定义
@@ -23,7 +12,7 @@ participant "Redis从节点1" as Slave1 #LightGreen
 participant "Redis从节点2" as Slave2 #LightGreen
 
 ' 1. 正常监控过程
-group #E0E0FF "正常监控过程"
+box "正常监控过程" #E0E0FF
     ' Sentinel A 监控主节点
     SA -> Master: PING // src/sentinel.c:3075
     Master --> SA: PONG
@@ -53,10 +42,10 @@ group #E0E0FF "正常监控过程"
     Master --> SB: OK
     Master -> SA: 转发hello消息
     SA -> SA: 更新SB的状态信息
-end group
+end box
 
 ' 2. 故障检测过程
-group #FFE0E0 "故障检测过程"
+box "故障检测过程" #FFE0E0
     note over Master: 主节点故障
 
     ' 主观下线检测
@@ -71,17 +60,17 @@ group #FFE0E0 "故障检测过程"
     SA -> SB: SENTINEL is-master-down-by-addr // src/sentinel.c:2476
     SB --> SA: 回复主节点已下线
     SA -> SA: 标记主节点为客观下线(ODOWN)\n(达到法定人数) // src/sentinel.c:2476
-end group
+end box
 
 ' 3. 领导者选举过程
-group #E0FFE0 "领导者选举过程"
+box "领导者选举过程" #E0FFE0
     SA -> SB: SENTINEL is-master-down-by-addr [请求投票] // src/sentinel.c:2476
     SB --> SA: 投票给SA
     SA -> SA: 确认自己为领导者 // src/sentinel.c:2476
-end group
+end box
 
 ' 4. 故障转移过程
-group #FFE0FF "故障转移过程"
+box "故障转移过程" #FFE0FF
     ' 开始故障转移
     SA -> SA: 开始故障转移 // src/sentinel.c:4018
     SA -> SA: 状态: WAIT_START // src/sentinel.c:4019
@@ -110,10 +99,10 @@ group #FFE0FF "故障转移过程"
     ' 更新配置
     SA -> SA: 状态: UPDATE_CONFIG // src/sentinel.c:4020
     SA -> SA: 更新配置 // src/sentinel.c:4020
-end group
+end box
 
 ' 5. 配置更新和通知
-group  #FFFFE0 "配置更新和通知"
+box "配置更新和通知" #FFFFE0
     ' 更新配置
     SA -> SA: 发布+switch-master事件 // src/sentinel.c:4020
     SA -> SA: 持久化配置到磁盘 // src/sentinel.c:2261
@@ -123,6 +112,6 @@ group  #FFFFE0 "配置更新和通知"
     Master -> SB: 转发hello消息
     SB -> SB: 更新配置 // src/sentinel.c:3370
     SB -> SB: 持久化配置到磁盘 // src/sentinel.c:2261
-end group
+end box
 
 @enduml

@@ -12199,6 +12199,11 @@ void modulesCron(void) {
      * that we didn't use for the last cron period. */
 
     /* Limit the max client count to be freed at once to avoid latency spikes.*/
+    /* 检查池中临时客户端的数量，并释放自上次定时任务以来未使用的客户端。
+     * moduleTempClientMinCount 记录自上次定时任务以来池中最少的客户端数量。
+     * 这是在上一个定时任务周期中未使用的客户端数量。 */
+
+    /* 限制一次释放的最大客户端数量，以避免延迟峰值。 */
     int iteration = 50;
     /* We are freeing clients if we have more than 8 unused clients. Keeping
      * small amount of clients to avoid client allocation costs if temporary
@@ -12267,6 +12272,12 @@ void moduleLoadInternalModules(void) {
  * modules is not considered sane: clients may rely on the existence of
  * given commands, loading AOF also may need some modules to exist, and
  * if this instance is a slave, it must understand commands from master. */
+/* 加载所有在 server.loadmodule_queue 列表中的模块，该列表由配置文件中的 `loadmodule` 指令填充。
+* 我们不能在处理配置文件时直接加载模块，因为服务器必须在加载模块之前完全初始化。
+*
+* 如果发生错误，该函数会中止服务器，因为在缺少模块的情况下启动被认为是不合理的：
+* 客户端可能依赖于某些命令的存在，加载 AOF 也可能需要某些模块存在，
+* 如果此实例是从节点，它必须能够理解来自主节点的命令。 */
 void moduleLoadFromQueue(void) {
     listIter li;
     listNode *ln;
@@ -13209,6 +13220,67 @@ unsigned int maskModuleEnumConfigFlags(unsigned int flags) {
  * * EBUSY: Registering the Config outside of RedisModule_OnLoad.
  * * EINVAL: The provided flags are invalid for the registration or the name of the config contains invalid characters.
  * * EALREADY: The provided configuration name is already used. */
+/* 创建一个字符串配置，Redis 用户可以通过 Redis 配置文件、`CONFIG SET`、`CONFIG GET` 和 `CONFIG REWRITE` 命令与其交互。
+*
+* 配置的实际值由模块拥有，`getfn`、`setfn` 和可选的 `applyfn` 回调函数提供给 Redis，用于访问或操作该值。
+* `getfn` 回调从模块中检索值，而 `setfn` 回调将值存储到模块配置中。
+* 可选的 `applyfn` 回调在 `CONFIG SET` 命令修改了一个或多个配置后调用，并可用于在多个配置一起更改后原子性地应用配置。
+* 如果单个 `CONFIG SET` 命令设置了多个具有 `applyfn` 回调的配置，并且它们的 `applyfn` 函数和 `privdata` 指针相同，则会去重，回调只会运行一次。
+* 如果提供的值无效或无法使用，`setfn` 和 `applyfn` 都可以返回错误。
+* 配置还声明了一个值的类型，该类型由 Redis 验证并提供给模块。配置系统提供以下类型：
+*
+* * Redis 字符串：二进制安全的字符串数据。
+* * 枚举：有限数量的字符串标记之一，在注册时提供。
+* * 数值：64 位有符号整数，还支持最小值和最大值。
+* * 布尔值：是或否的值。
+*
+* 当值成功应用时，`setfn` 回调应返回 REDISMODULE_OK。如果值无法应用，它也可以返回 REDISMODULE_ERR，并且可以通过 *err 指针设置一个 RedisModuleString 错误消息以提供给客户端。
+* 该 RedisModuleString 在从 set 回调返回后将由 Redis 释放。
+*
+* 所有配置都通过名称、类型、默认值、在回调中可用的私有数据以及几个修改配置行为的标志进行注册。
+* 名称只能包含字母数字字符或短横线。支持的标志包括：
+*
+* * REDISMODULE_CONFIG_DEFAULT：配置的默认标志。创建一个可以在启动后修改的配置。
+* * REDISMODULE_CONFIG_IMMUTABLE：此配置只能在加载时提供。
+* * REDISMODULE_CONFIG_SENSITIVE：存储在此配置中的值会从所有日志记录中隐藏。
+* * REDISMODULE_CONFIG_HIDDEN：名称在带有模式匹配的 `CONFIG GET` 中隐藏。
+* * REDISMODULE_CONFIG_PROTECTED：此配置只能根据 enable-protected-configs 的值进行修改。
+* * REDISMODULE_CONFIG_DENY_LOADING：服务器加载数据时无法修改此配置。
+* * REDISMODULE_CONFIG_MEMORY：对于数值配置，此配置会将数据单位符号转换为其字节等价值。
+* * REDISMODULE_CONFIG_BITFLAGS：对于枚举配置，此配置允许将多个条目组合为位标志。
+*
+* 默认值在启动时用于设置值（如果未通过配置文件或命令行提供）。默认值还用于在配置重写时进行比较。
+*
+* 注意：
+*
+*  1. 对于字符串配置设置，传递给 set 回调的字符串在执行后将被释放，模块必须保留它。
+*  2. 对于字符串配置获取，字符串不会被消耗，并且在执行后仍然有效。
+*
+* 示例实现：
+*
+*     RedisModuleString *strval;
+*     int adjustable = 1;
+*     RedisModuleString *getStringConfigCommand(const char *name, void *privdata) {
+*         return strval;
+*     }
+*
+*     int setStringConfigCommand(const char *name, RedisModuleString *new, void *privdata, RedisModuleString **err) {
+*        if (adjustable) {
+*            RedisModule_Free(strval);
+*            RedisModule_RetainString(NULL, new);
+*            strval = new;
+*            return REDISMODULE_OK;
+*        }
+*        *err = RedisModule_CreateString(NULL, "不可调整。", 15);
+*        return REDISMODULE_ERR;
+*     }
+*     ...
+*     RedisModule_RegisterStringConfig(ctx, "string", NULL, REDISMODULE_CONFIG_DEFAULT, getStringConfigCommand, setStringConfigCommand, NULL, NULL);
+*
+* 如果注册失败，将返回 REDISMODULE_ERR，并设置以下之一的 errno：
+* * EBUSY：在 RedisModule_OnLoad 之外注册配置。
+* * EINVAL：提供的标志对于注册无效，或者配置名称包含无效字符。
+* * EALREADY：提供的配置名称已被使用。 */
 int RM_RegisterStringConfig(RedisModuleCtx *ctx, const char *name, const char *default_val, unsigned int flags, RedisModuleConfigGetStringFunc getfn, RedisModuleConfigSetStringFunc setfn, RedisModuleConfigApplyFunc applyfn, void *privdata) {
     RedisModule *module = ctx->module;
     if (moduleConfigValidityCheck(module, name, flags, NUMERIC_CONFIG)) {
@@ -13243,10 +13315,10 @@ int RM_RegisterBoolConfig(RedisModuleCtx *ctx, const char *name, int default_val
     return REDISMODULE_OK;
 }
 
-/* 
- * Create an enum config that server clients can interact with via the 
- * `CONFIG SET`, `CONFIG GET`, and `CONFIG REWRITE` commands. 
- * Enum configs are a set of string tokens to corresponding integer values, where 
+/*
+ * Create an enum config that server clients can interact with via the
+ * `CONFIG SET`, `CONFIG GET`, and `CONFIG REWRITE` commands.
+ * Enum configs are a set of string tokens to corresponding integer values, where
  * the string value is exposed to Redis clients but the value passed Redis and the
  * module is the integer value. These values are defined in enum_values, an array
  * of null-terminated c strings, and int_vals, an array of enum values who has an
@@ -13259,7 +13331,7 @@ int RM_RegisterBoolConfig(RedisModuleCtx *ctx, const char *name, int default_val
  *      int getEnumConfigCommand(const char *name, void *privdata) {
  *          return enum_val;
  *      }
- *       
+ *
  *      int setEnumConfigCommand(const char *name, int val, void *privdata, const char **err) {
  *          enum_val = val;
  *          return REDISMODULE_OK;
@@ -13272,6 +13344,33 @@ int RM_RegisterBoolConfig(RedisModuleCtx *ctx, const char *name, int default_val
  * sort your enums so that the preferred combinations are present first.
  *
  * See RedisModule_RegisterStringConfig for detailed general information about configs. */
+/*
+* 创建一个枚举配置，Redis 客户端可以通过
+* `CONFIG SET`、`CONFIG GET` 和 `CONFIG REWRITE` 命令与其交互。
+* 枚举配置是一组字符串标记与对应整数值的映射，其中字符串值暴露给 Redis 客户端，
+* 而传递给 Redis 和模块的是整数值。这些值由 `enum_values`（一个以空字符结尾的字符串数组）定义，
+* 以及 `int_vals`（一个与 `enum_values` 索引对应的枚举值数组）定义。
+* 示例实现：
+*      const char *enum_vals[3] = {"first", "second", "third"};
+*      const int int_vals[3] = {0, 2, 4};
+*      int enum_val = 0;
+*
+*      int getEnumConfigCommand(const char *name, void *privdata) {
+*          return enum_val;
+*      }
+*
+*      int setEnumConfigCommand(const char *name, int val, void *privdata, const char **err) {
+*          enum_val = val;
+*          return REDISMODULE_OK;
+*      }
+*      ...
+*      RedisModule_RegisterEnumConfig(ctx, "enum", 0, REDISMODULE_CONFIG_DEFAULT, enum_vals, int_vals, 3, getEnumConfigCommand, setEnumConfigCommand, NULL, NULL);
+*
+* 注意：你可以使用 `REDISMODULE_CONFIG_BITFLAGS`，以便将多个枚举字符串组合成一个整数作为位标志，
+* 在这种情况下，你可能希望将枚举按优先组合的顺序进行排序。
+*
+* 有关配置的详细信息，请参阅 `RedisModule_RegisterStringConfig`。
+*/
 int RM_RegisterEnumConfig(RedisModuleCtx *ctx, const char *name, int default_val, unsigned int flags, const char **enum_values, const int *int_values, int num_enum_vals, RedisModuleConfigGetEnumFunc getfn, RedisModuleConfigSetEnumFunc setfn, RedisModuleConfigApplyFunc applyfn, void *privdata) {
     RedisModule *module = ctx->module;
     if (moduleConfigValidityCheck(module, name, flags, ENUM_CONFIG)) {
@@ -13325,6 +13424,14 @@ int RM_RegisterNumericConfig(RedisModuleCtx *ctx, const char *name, long long de
  * 1. outside RedisModule_OnLoad
  * 2. more than once
  * 3. after the RedisModule_LoadConfigs call */
+/* 应用模块注册的参数的所有默认配置。
+* 仅当模块希望在实际值由 RedisModule_LoadConfigs 应用之前更改配置值时调用此函数。
+* 否则，仅调用 RedisModule_LoadConfigs 就足够了，它应该已经在需要时设置了默认值。
+* 这使得可以区分默认值和用户提供的值，并在设置默认值和用户值之间应用其他更改。
+* 如果在以下情况下调用，此函数将返回 REDISMODULE_ERR：
+* 1. 在 RedisModule_OnLoad 之外调用
+* 2. 调用超过一次
+* 3. 在调用 RedisModule_LoadConfigs 之后 */
 int RM_LoadDefaultConfigs(RedisModuleCtx *ctx) {
     if (!ctx || !ctx->module || !ctx->module->onload || ctx->module->configs_initialized) {
         return REDISMODULE_ERR;

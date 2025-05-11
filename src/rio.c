@@ -148,11 +148,8 @@ static size_t rioFileWrite(rio *r, const void *buf, size_t len) {
     /* 如果未启用自动同步，直接写入文件 */
     if (!r->io.file.autosync) return fwrite(buf,len,1,r->io.file.fp);
 
-    size_t nwritten = 0;
-
     /* 写入文件 */
     if (fwrite(buf,len,1,r->io.file.fp) == 0) return 0;
-    nwritten += len;
 
     /* 更新已缓冲的字节数 */
     r->io.file.buffered += len;
@@ -270,29 +267,6 @@ static size_t rioConnRead(rio *r, void *buf, size_t len) {
     if (avail == 0) return 0;
     if (len > avail) len = avail;
 
-    /* 处理未读缓冲区中的数据 */
-    if (r->io.conn.has_unread) {
-        /* 从未读缓冲区中读取数据 */
-        size_t copy = len;
-        if (copy > sdslen(r->io.conn.unread_buf) - r->io.conn.unread_pos)
-            copy = sdslen(r->io.conn.unread_buf) - r->io.conn.unread_pos;
-
-        /* 复制数据 */
-        memcpy(buf, r->io.conn.unread_buf + r->io.conn.unread_pos, copy);
-        r->io.conn.unread_pos += copy;
-
-        /* 如果未读缓冲区已读完，清除标志 */
-        if (r->io.conn.unread_pos == sdslen(r->io.conn.unread_buf)) {
-            r->io.conn.has_unread = 0;
-            r->io.conn.unread_pos = 0;
-            sdsclear(r->io.conn.unread_buf);
-        }
-
-        /* 更新已读计数器 */
-        r->io.conn.read_so_far += copy;
-        return 1;
-    }
-
     /* 从连接读取数据 */
     if (connRead(r->io.conn.conn, buf, len) != (ssize_t)len) return 0;
     r->io.conn.read_so_far += len;
@@ -328,7 +302,7 @@ static const rio rioConnIO = {
         0,                   /* 标志 */
         0,                   /* 已处理字节数 */
         0,                   /* 读/写块大小 */
-        { { NULL, 0 } }      /* I/O 特定变量的联合体 */
+        { .conn = { NULL, 0, NULL, 0, 0 } }      /* I/O 特定变量的联合体，修正初始化 */
 };
 
 /*
@@ -347,11 +321,8 @@ void rioInitWithConn(rio *r, connection *conn, size_t read_limit) {
     r->io.conn.read_limit = read_limit;
     /* 初始化已读计数器 */
     r->io.conn.read_so_far = 0;
-    /* 初始化未读标志 */
-    r->io.conn.has_unread = 0;
-    /* 初始化未读缓冲区 */
-    r->io.conn.unread_buf = NULL;
-    r->io.conn.unread_pos = 0;
+    r->io.conn.pos = 0;
+    r->io.conn.buf = NULL;
 }
 
 /*
@@ -363,12 +334,12 @@ void rioInitWithConn(rio *r, connection *conn, size_t read_limit) {
 void rioFreeConn(rio *r, sds* out_remainingBufferedData) {
     /* 如果调用者需要未读数据，返回缓冲区 */
     if (out_remainingBufferedData)
-        *out_remainingBufferedData = r->io.conn.unread_buf;
+        *out_remainingBufferedData = r->io.conn.buf;
     else
-        sdsfree(r->io.conn.unread_buf);
+        sdsfree(r->io.conn.buf);
 
     /* 清除未读缓冲区指针 */
-    r->io.conn.unread_buf = NULL;
+    r->io.conn.buf = NULL;
 }
 
 /* ------------------- File descriptor implementation ------------------- */
@@ -413,9 +384,8 @@ static size_t rioFdWrite(rio *r, const void *buf, size_t len) {
     }
 
     /* 直接写入文件描述符 */
-    size_t nwritten = 0;
-    while(nwritten != len) {
-        retval = write(r->io.fd.fd, p+nwritten, len-nwritten);
+    while(len > 0) {
+        retval = write(r->io.fd.fd, p, len);
         if (retval <= 0) {
             /* 处理中断错误 */
             if (retval == -1 && errno == EINTR) continue;
@@ -423,7 +393,8 @@ static size_t rioFdWrite(rio *r, const void *buf, size_t len) {
             if (retval == -1 && errno == EWOULDBLOCK) errno = ETIMEDOUT;
             return 0; /* 写入失败 */
         }
-        nwritten += retval;
+        p += retval;
+        len -= retval;
     }
 
     /* 更新位置 */
@@ -471,7 +442,7 @@ static const rio rioFdIO = {
         0,                   /* 标志 */
         0,                   /* 已处理字节数 */
         0,                   /* 读/写块大小 */
-        { { 0, NULL } }      /* I/O 特定变量的联合体 */
+        { { 0, 0 } }      /* I/O 特定变量的联合体 */
 };
 
 /*
