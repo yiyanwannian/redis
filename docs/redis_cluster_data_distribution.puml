@@ -1,0 +1,109 @@
+@startuml Redis集群数据分布示例
+!theme plain
+skinparam backgroundColor white
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+
+title Redis集群数据分布状态示例
+
+' 定义物理服务器
+rectangle "物理服务器1 (192.168.1.1)" as Server1 #LightGray {
+  component "主节点A\n(端口7000)" as MasterA #LightBlue {
+    database "哈希槽 0-5460" as SlotsA #LightCyan {
+      card "key1 (hash=1234)" as Key1
+      card "key4 (hash=3456)" as Key4
+      card "key7 (hash=5000)" as Key7
+    }
+  }
+  
+  component "从节点C1\n(端口7003)" as SlaveC1 #LightGreen {
+    database "哈希槽 10923-16383 的副本" as SlotsCReplica1 #LightYellow {
+      card "key3 (hash=12000) 的副本" as Key3Replica1
+      card "key6 (hash=15000) 的副本" as Key6Replica1
+      card "key9 (hash=16000) 的副本" as Key9Replica1
+    }
+  }
+}
+
+rectangle "物理服务器2 (192.168.1.2)" as Server2 #LightGray {
+  component "主节点B\n(端口7001)" as MasterB #LightBlue {
+    database "哈希槽 5461-10922" as SlotsB #LightCyan {
+      card "key2 (hash=6000)" as Key2
+      card "key5 (hash=8000)" as Key5
+      card "key8 (hash=10000)" as Key8
+    }
+  }
+  
+  component "从节点A1\n(端口7004)" as SlaveA1 #LightGreen {
+    database "哈希槽 0-5460 的副本" as SlotsAReplica1 #LightYellow {
+      card "key1 (hash=1234) 的副本" as Key1Replica
+      card "key4 (hash=3456) 的副本" as Key4Replica
+      card "key7 (hash=5000) 的副本" as Key7Replica
+    }
+  }
+}
+
+rectangle "物理服务器3 (192.168.1.3)" as Server3 #LightGray {
+  component "主节点C\n(端口7002)" as MasterC #LightBlue {
+    database "哈希槽 10923-16383" as SlotsC #LightCyan {
+      card "key3 (hash=12000)" as Key3
+      card "key6 (hash=15000)" as Key6
+      card "key9 (hash=16000)" as Key9
+    }
+  }
+  
+  component "从节点B1\n(端口7005)" as SlaveB1 #LightGreen {
+    database "哈希槽 5461-10922 的副本" as SlotsBReplica1 #LightYellow {
+      card "key2 (hash=6000) 的副本" as Key2Replica
+      card "key5 (hash=8000) 的副本" as Key5Replica
+      card "key8 (hash=10000) 的副本" as Key8Replica
+    }
+  }
+}
+
+' 定义复制关系
+MasterA -down-> SlaveA1 : 复制数据
+MasterB -down-> SlaveB1 : 复制数据
+MasterC -down-> SlaveC1 : 复制数据
+
+' 定义集群通信
+MasterA <--> MasterB : 集群总线通信
+MasterB <--> MasterC : 集群总线通信
+MasterC <--> MasterA : 集群总线通信
+SlaveA1 <--> SlaveB1 : 集群总线通信
+SlaveB1 <--> SlaveC1 : 集群总线通信
+SlaveC1 <--> SlaveA1 : 集群总线通信
+
+' 添加客户端
+actor "客户端" as Client
+
+' 客户端请求示例
+Client -[#red]-> MasterA : GET key1
+Client -[#red]-> MasterB : GET key2
+Client -[#red]-> MasterC : GET key3
+Client -[#blue]-> SlaveA1 : GET key1 (读取副本)
+
+note bottom of Client
+  客户端请求流程:
+  1. 计算键的哈希值: CRC16(key) mod 16384
+  2. 根据哈希槽确定负责的节点
+  3. 直接向对应节点发送请求
+  4. 如果节点不负责该哈希槽，返回MOVED重定向
+end note
+
+' 添加哈希槽分布说明
+note right of Server3
+  **哈希槽分布**
+  - 总共16384个哈希槽
+  - 主节点A: 0-5460
+  - 主节点B: 5461-10922
+  - 主节点C: 10923-16383
+  
+  **数据分布原则**
+  - 每个键根据CRC16(key) mod 16384计算所属哈希槽
+  - 每个主节点负责一部分哈希槽
+  - 每个从节点复制其主节点的所有数据
+  - 从节点与主节点分布在不同物理机器上
+end note
+
+@enduml

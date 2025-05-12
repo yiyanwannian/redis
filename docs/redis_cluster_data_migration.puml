@@ -1,0 +1,71 @@
+@startuml Redis集群数据迁移示例
+!theme plain
+skinparam backgroundColor white
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+skinparam sequenceMessageAlign center
+
+title Redis集群数据迁移过程
+
+' 定义参与者
+participant "客户端" as Client
+participant "源节点\n(哈希槽5000-6000)" as SourceNode
+participant "目标节点\n(接收哈希槽5000-6000)" as TargetNode
+participant "其他集群节点" as OtherNodes
+
+' 迁移前状态
+note over SourceNode, TargetNode
+  **迁移前状态**
+  源节点: 负责哈希槽5000-6000
+  目标节点: 未负责哈希槽5000-6000
+  键"user:1001"的哈希值映射到槽5678
+end note
+
+' 迁移过程
+== 1. 迁移准备 ==
+SourceNode -> TargetNode: CLUSTER SETSLOT 5678 IMPORTING <源节点ID>
+TargetNode --> SourceNode: OK
+SourceNode -> SourceNode: CLUSTER SETSLOT 5678 MIGRATING <目标节点ID>
+SourceNode -> OtherNodes: 广播槽位状态变更
+OtherNodes --> SourceNode: 确认
+
+== 2. 数据迁移 ==
+SourceNode -> SourceNode: 识别槽5678中的所有键
+SourceNode -> TargetNode: MIGRATE <目标IP> <目标端口> "" 0 5000 KEYS "user:1001" ...
+note right: 使用MIGRATE命令原子性地迁移键
+TargetNode --> SourceNode: OK
+
+== 3. 处理迁移过程中的请求 ==
+Client -> SourceNode: GET user:1001
+alt 键已迁移
+  SourceNode --> Client: ASK <槽> <目标节点地址>
+  Client -> TargetNode: ASKING\nGET user:1001
+  TargetNode --> Client: <值>
+else 键未迁移
+  SourceNode -> SourceNode: 本地处理请求
+  SourceNode --> Client: <值>
+end
+
+== 4. 完成迁移 ==
+SourceNode -> SourceNode: 确认槽5678的所有键已迁移
+SourceNode -> TargetNode: CLUSTER SETSLOT 5678 NODE <目标节点ID>
+TargetNode -> TargetNode: 接管槽5678
+TargetNode -> OtherNodes: 广播槽位分配变更
+OtherNodes --> TargetNode: 确认
+
+' 迁移后状态
+note over SourceNode, TargetNode
+  **迁移后状态**
+  源节点: 不再负责哈希槽5678
+  目标节点: 现在负责哈希槽5678
+  键"user:1001"现在存储在目标节点
+end note
+
+== 5. 客户端路由更新 ==
+Client -> SourceNode: GET user:1001
+SourceNode --> Client: MOVED <槽> <目标节点地址>
+Client -> TargetNode: GET user:1001
+TargetNode --> Client: <值>
+Client -> Client: 更新本地路由表
+
+@enduml

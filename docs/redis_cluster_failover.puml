@@ -1,0 +1,184 @@
+@startuml Redis集群故障转移示例
+!theme plain
+skinparam backgroundColor white
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+
+title Redis集群故障转移示例
+
+' 定义物理服务器 - 正常状态
+rectangle "正常状态" as NormalState {
+  rectangle "物理服务器1 (192.168.1.1)" as Server1Normal #LightGray {
+    component "主节点A\n(端口7000)" as MasterANormal #LightBlue {
+      database "哈希槽 0-5460" as SlotsANormal #LightCyan
+    }
+    
+    component "从节点C1\n(端口7003)" as SlaveC1Normal #LightGreen {
+      database "哈希槽 10923-16383 的副本" as SlotsCReplica1Normal #LightYellow
+    }
+  }
+
+  rectangle "物理服务器2 (192.168.1.2)" as Server2Normal #LightGray {
+    component "主节点B\n(端口7001)" as MasterBNormal #LightBlue {
+      database "哈希槽 5461-10922" as SlotsBNormal #LightCyan
+    }
+    
+    component "从节点A1\n(端口7004)" as SlaveA1Normal #LightGreen {
+      database "哈希槽 0-5460 的副本" as SlotsAReplica1Normal #LightYellow
+    }
+  }
+
+  rectangle "物理服务器3 (192.168.1.3)" as Server3Normal #LightGray {
+    component "主节点C\n(端口7002)" as MasterCNormal #LightBlue {
+      database "哈希槽 10923-16383" as SlotsCNormal #LightCyan
+    }
+    
+    component "从节点B1\n(端口7005)" as SlaveB1Normal #LightGreen {
+      database "哈希槽 5461-10922 的副本" as SlotsBReplica1Normal #LightYellow
+    }
+  }
+
+  ' 定义复制关系
+  MasterANormal -down-> SlaveA1Normal : 复制数据
+  MasterBNormal -down-> SlaveB1Normal : 复制数据
+  MasterCNormal -down-> SlaveC1Normal : 复制数据
+}
+
+' 定义物理服务器 - 故障状态
+rectangle "故障状态 (服务器1宕机)" as FailureState {
+  rectangle "物理服务器1 (192.168.1.1)" as Server1Failure #LightGray {
+    component "主节点A\n(端口7000)" as MasterAFailure #Red {
+      database "哈希槽 0-5460" as SlotsAFailure #LightPink
+    }
+    
+    component "从节点C1\n(端口7003)" as SlaveC1Failure #Red {
+      database "哈希槽 10923-16383 的副本" as SlotsCReplica1Failure #LightPink
+    }
+    
+    note bottom of Server1Failure
+      服务器1宕机
+      主节点A和从节点C1不可用
+    end note
+  }
+
+  rectangle "物理服务器2 (192.168.1.2)" as Server2Failure #LightGray {
+    component "主节点B\n(端口7001)" as MasterBFailure #LightBlue {
+      database "哈希槽 5461-10922" as SlotsBFailure #LightCyan
+    }
+    
+    component "新主节点A\n(原从节点A1)\n(端口7004)" as NewMasterA #Orange {
+      database "哈希槽 0-5460" as NewSlotsA #LightCyan
+    }
+    
+    note bottom of NewMasterA
+      从节点A1被提升为新主节点
+      接管哈希槽0-5460
+    end note
+  }
+
+  rectangle "物理服务器3 (192.168.1.3)" as Server3Failure #LightGray {
+    component "主节点C\n(端口7002)" as MasterCFailure #LightBlue {
+      database "哈希槽 10923-16383" as SlotsCFailure #LightCyan
+    }
+    
+    component "从节点B1\n(端口7005)" as SlaveB1Failure #LightGreen {
+      database "哈希槽 5461-10922 的副本" as SlotsBReplica1Failure #LightYellow
+    }
+  }
+
+  ' 定义复制关系
+  MasterBFailure -down-> SlaveB1Failure : 复制数据
+  MasterCFailure -[#red]-> SlaveC1Failure : 复制中断
+}
+
+' 定义物理服务器 - 恢复状态
+rectangle "恢复状态 (服务器1恢复)" as RecoveryState {
+  rectangle "物理服务器1 (192.168.1.1)" as Server1Recovery #LightGray {
+    component "从节点A2\n(原主节点A)\n(端口7000)" as NewSlaveA2 #LightGreen {
+      database "哈希槽 0-5460 的副本" as NewSlotsAReplica2 #LightYellow
+    }
+    
+    component "新从节点C1\n(端口7003)" as NewSlaveC1 #LightGreen {
+      database "哈希槽 10923-16383 的副本" as NewSlotsCReplica1 #LightYellow
+    }
+    
+    note bottom of NewSlaveA2
+      原主节点A恢复后
+      降级为从节点A2
+      复制新主节点A的数据
+    end note
+  }
+
+  rectangle "物理服务器2 (192.168.1.2)" as Server2Recovery #LightGray {
+    component "主节点B\n(端口7001)" as MasterBRecovery #LightBlue {
+      database "哈希槽 5461-10922" as SlotsBRecovery #LightCyan
+    }
+    
+    component "主节点A\n(原从节点A1)\n(端口7004)" as MasterARecovery #LightBlue {
+      database "哈希槽 0-5460" as SlotsARecovery #LightCyan
+    }
+  }
+
+  rectangle "物理服务器3 (192.168.1.3)" as Server3Recovery #LightGray {
+    component "主节点C\n(端口7002)" as MasterCRecovery #LightBlue {
+      database "哈希槽 10923-16383" as SlotsCRecovery #LightCyan
+    }
+    
+    component "从节点B1\n(端口7005)" as SlaveB1Recovery #LightGreen {
+      database "哈希槽 5461-10922 的副本" as SlotsBReplica1Recovery #LightYellow
+    }
+  }
+
+  ' 定义复制关系
+  MasterARecovery -down-> NewSlaveA2 : 复制数据
+  MasterBRecovery -down-> SlaveB1Recovery : 复制数据
+  MasterCRecovery -down-> NewSlaveC1 : 复制数据
+}
+
+' 添加故障转移流程说明
+note right of FailureState
+  **故障转移流程**
+  
+  1. **故障检测**
+     - 集群节点间通过心跳检测发现服务器1宕机
+     - 主节点A和从节点C1不可用
+     - 节点标记为PFAIL(疑似下线)
+     - 当超过半数节点确认后，标记为FAIL(确认下线)
+  
+  2. **从节点选举**
+     - 主节点A的从节点A1检测到主节点故障
+     - 从节点A1请求成为新主节点
+     - 其他主节点投票支持
+  
+  3. **角色转换**
+     - 从节点A1升级为新主节点
+     - 接管哈希槽0-5460
+     - 开始接受写请求
+  
+  4. **集群重新配置**
+     - 更新集群状态
+     - 所有节点更新路由表
+     - 客户端收到重定向命令，连接到新主节点
+end note
+
+note right of RecoveryState
+  **节点恢复流程**
+  
+  1. **服务器恢复**
+     - 服务器1重新上线
+     - 节点A和C1重新启动
+  
+  2. **角色重新分配**
+     - 原主节点A发现自己的槽位已被重新分配
+     - 自动降级为从节点A2
+     - 开始从新主节点A复制数据
+     - 从节点C1重新连接到主节点C
+     - 开始复制主节点C的数据
+  
+  3. **集群状态更新**
+     - 更新集群配置
+     - 所有节点更新路由表
+     - 集群恢复完整的主从结构
+end note
+
+@enduml

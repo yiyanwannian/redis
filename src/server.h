@@ -1061,20 +1061,20 @@ typedef struct replBufBlock {
 
 /* Redis database representation. There are multiple databases identified
  * by integers from 0 (the default database) up to the max configured
- * database. The database number is the 'id' field in the structure. */
+ * database. The database number is the 'id' field in the structure. */ /* Redis 数据库表示。有多个数据库，通过从 0（默认数据库）到最大配置数据库的整数标识。 数据库编号是结构中的 'id' 字段。 */
 typedef struct redisDb {
-    kvstore *keys;              /* The keyspace for this DB. As metadata, holds keysizes histogram */
-    kvstore *expires;           /* Timeout of keys with a timeout set */
-    ebuckets hexpires;          /* Hash expiration DS. Single TTL per hash (of next min field to expire) */
-    dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP)*/
+    kvstore *keys;              /* The keyspace for this DB. As metadata, holds keysizes histogram */  /* 此数据库的键空间。作为元数据，保存键大小的直方图 */
+    kvstore *expires;           /* Timeout of keys with a timeout set */ /* 设置了超时的键的超时时间 */
+    ebuckets hexpires;          /* Hash expiration DS. Single TTL per hash (of next min field to expire) */ /* 哈希过期数据结构。每个哈希一个 TTL（下一个最小字段的过期时间） */
+    dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP) */  /* 客户端等待数据的键（如 BLPOP） */
     dict *blocking_keys_unblock_on_nokey;   /* Keys with clients waiting for
                                              * data, and should be unblocked if key is deleted (XREADEDGROUP).
-                                             * This is a subset of blocking_keys*/
-    dict *ready_keys;           /* Blocked keys that received a PUSH */
-    dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
-    int id;                     /* Database ID */
-    long long avg_ttl;          /* Average TTL, just for stats */
-    unsigned long expires_cursor; /* Cursor of the active expire cycle. */
+                                             * This is a subset of blocking_keys */ /* 客户端等待数据的键，如果键被删除（如 XREADEDGROUP），应解除阻塞。 这是 blocking_keys 的子集 */
+    dict *ready_keys;           /* Blocked keys that received a PUSH */  /* 收到 PUSH 的被阻塞键 */
+    dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */ /* 用于 MULTI/EXEC CAS 的 WATCHED 键 */
+    int id;                     /* Database ID */ /* 数据库 ID */
+    long long avg_ttl;          /* Average TTL, just for stats */ /* 平均 TTL，仅用于统计 */
+    unsigned long expires_cursor; /* Cursor of the active expire cycle. */  /* 活跃过期循环的游标 */
 } redisDb;
 
 /* forward declaration for functions ctx */
